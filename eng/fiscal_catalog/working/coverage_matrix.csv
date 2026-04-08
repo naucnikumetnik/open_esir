@@ -1,0 +1,29 @@
+SourceId,Title,Types,Contracts,Rules,ErrorsStatuses,Examples,Rendering,JournalAudit,SecureElement,OverallStatus,NextPass,Notes
+KB-001,Zakon o fiskalizaciji,triaged,n/a,triaged,n/a,n/a,n/a,n/a,n/a,triaged,domain_baseline,Used to anchor actors and legal responsibilities
+KB-002,Pravilnik,duplicate,n/a,duplicate,n/a,n/a,n/a,n/a,n/a,duplicate,merged_into_KB-011,The PDF and docx content duplicate the BE rulebook tracked as KB-011
+KB-003,Pravilnik o vrstama fiskalnih racuna,seeded,triaged,seeded,triaged,triaged,seeded,n/a,n/a,seeded,domain_types_and_rules,Primary domain extraction source
+KB-004,Tehnicki vodic,triaged,triaged,triaged,triaged,n/a,n/a,n/a,triaged,triaged,system_roles,Use for responsibility boundaries and system roles
+KB-005,Tehnicko uputstvo ESIR ili L-PFR,seeded,triaged,seeded,triaged,seeded,seeded,triaged,triaged,seeded,questionnaires_and_examples,High-value source for samples and approval-linked behavior
+KB-006,Technical Documentation,seeded,seeded,seeded,seeded,seeded,triaged,triaged,seeded,seeded,protocol_and_se,Primary spec source for protocols and status/error codes; validation error payload and environment endpoint bundle are now explicitly extracted
+KB-007,Rucno testiranje L-PFR,triaged,triaged,seeded,seeded,seeded,n/a,seeded,in_progress,in_progress,lpfr_negative_scenarios,Negative-state HTTP expectations and audit-limit behavior are now seeded
+KB-008,Runocno testiranje ESIR,triaged,triaged,seeded,triaged,seeded,seeded,seeded,n/a,seeded,scope_conflict_resolved,Rendering parity delivery journal rules and the Optional buyer-field scope conflict are now seeded
+KB-009,Overview,n/a,n/a,triaged,n/a,n/a,triaged,n/a,triaged,triaged,background_complete,Background principles now cross-check configurable environment naming and public verification expectations
+KB-010,Concepts,seeded,n/a,seeded,n/a,seeded,seeded,seeded,seeded,seeded,background_primitives,UID PAC PFX password MRC verification and QR-size primitives are now extracted from the concepts guide
+KB-011,Pravilnik bezbednosni element,seeded,n/a,seeded,n/a,n/a,n/a,n/a,seeded,seeded,be_constraints,Normative BE form-factor lifecycle binding and counter obligations are now extracted
+KB-012,Obaveze obveznika fiskalizacije,triaged,n/a,seeded,n/a,seeded,n/a,n/a,n/a,seeded,refund_guidance_closed,Guidance now seeds both the on-site refund JMBG exclusion and the noncash refund customer-trace branch and the missing payload shape is classified as unpublished in the reviewed corpus
+KB-013,Aplikacije,n/a,triaged,seeded,n/a,seeded,seeded,triaged,n/a,triaged,public_verification_context,Public verification JSON mode and fallback verification inputs are captured while the rest stays application context
+KB-014,Timovi i uloge,n/a,n/a,triaged,n/a,n/a,n/a,n/a,n/a,triaged,approval_context_closed,Process-role context reviewed with no canonical fiscal types extracted
+KB-015,Pasted external chat notes,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,low_authority_context,Reviewed as low-authority strategy context only and deliberately kept out of canonical norms
+KB-016,Sifrarnik jedinstvenog ID kupca,seeded,n/a,seeded,n/a,seeded,n/a,n/a,n/a,seeded,buyer_id_codebook_closed,Buyer identification and optional field code tables are seeded and the remaining strict-regex gap is now classified as unpublished in the reviewed corpus
+KB-017,Poreska uprava FAQ,triaged,n/a,seeded,n/a,triaged,triaged,n/a,n/a,triaged,faq_conflicts_reconciled,FAQ contradictions are now treated as lower-authority wording beside the stronger technical approval material
+KB-018,eFiskalizacija minimalni starter set,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,onboarding_index,Curated onboarding map reviewed and classified as an index back to stronger official sources
+KB-019,eFiskalizacija resursi SR markdown,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,resource_index_triaged,Curated resource list reviewed and kept as a traceability helper rather than a source of canonical rules
+KB-020,eFiskalizacija resursi SR spreadsheet,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,triaged,resource_index_triaged,Spreadsheet reviewed and classified as a structured mirror of the curated resource index rather than a source of canonical rules
+KB-021,eFisk archive,duplicate,duplicate,duplicate,duplicate,duplicate,duplicate,duplicate,duplicate,duplicate,archive_mirror_of_corpus,Archive listing matches the already unpacked core corpus and currently adds no extra canonical material
+KB-022,Confidentiality,n/a,n/a,n/a,n/a,n/a,n/a,n/a,n/a,triaged,closed_not_relevant,License and confidentiality notice reviewed and closed as not relevant to fiscal type extraction
+REF-001,Taxcore MobilePOS Android,seeded,seeded,seeded,triaged,seeded,triaged,triaged,n/a,seeded,invoice_request_response,Also used to confirm Serbian localization crosswalk protocol payment labels known endpoint key bundle and the absence of stricter local buyer validators
+REF-002,VSDC Request Submitter V3.0,triaged,seeded,seeded,triaged,seeded,n/a,n/a,n/a,seeded,vsdc_envelope,Connected V-SDC envelope PAC header optional headers and certificate-selection flow are now captured while the body contract stays aligned with the official spec
+REF-003,SE Sign Invoice,triaged,n/a,triaged,triaged,triaged,n/a,n/a,seeded,triaged,se_legacy,Legacy secure element command flow
+REF-004,SE Sign Invoice V3.0,triaged,n/a,triaged,triaged,triaged,n/a,n/a,seeded,triaged,se_v3,Current secure element command flow
+REF-005,Secure Element Reader,triaged,seeded,triaged,seeded,triaged,n/a,triaged,seeded,seeded,apdu_and_card_lifecycle,Main reference for APDU and card state handling
+REF-006,TaxCore Certificates Library,triaged,n/a,triaged,triaged,triaged,n/a,n/a,triaged,triaged,certificate_metadata,Reference for certificate-related types

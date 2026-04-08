@@ -1,0 +1,74 @@
+EnumId,CanonicalName,Value,SourceValue,Label,Meaning,AppliesTo,Deprecated,Authority,Confidence,SourceRefs,Notes
+ENUM-001,RSReceiptKind,promet,promet,Promet,Fiscal receipt for retail sale,Receipt rendering and legal domain,no,normative,high,KB-003,Usually maps to TaxCoreInvoiceType Normal
+ENUM-002,RSReceiptKind,avans,avans,Avans,Fiscal receipt for received advance,Receipt rendering and legal domain,no,normative,high,KB-003,Usually maps to TaxCoreInvoiceType Advance
+ENUM-003,RSFiscalDocumentKind,kopija_racuna,kopija računa,Kopija,Copy document that is not a fiscal receipt,Receipt rendering and legal domain,no,normative,high,KB-003,Must be visually distinguished
+ENUM-004,RSFiscalDocumentKind,racun_obuke,račun obuke,Obuka,Training document that is not a fiscal receipt,Receipt rendering and legal domain,no,normative,high,KB-003,Must be visually distinguished
+ENUM-005,RSFiscalDocumentKind,predracun,predračun,Predračun,Proforma document that is not a fiscal receipt,Receipt rendering and legal domain,no,normative,high,KB-003,Must be visually distinguished
+ENUM-006,RSTransactionKind,prodaja,prodaja,Prodaja,Sale transaction under Serbian rulebook,Receipt rendering and legal domain,no,normative,high,KB-003,Maps to TaxCoreTransactionType Sale
+ENUM-007,RSTransactionKind,refundacija_ponistavanje,refundacija odnosno poništavanje računa,Refundacija odnosno poništavanje,Refund and cancellation bucket under Serbian rulebook,Receipt rendering and legal domain,no,normative,high,KB-003,TaxCore spec uses Refund
+ENUM-008,RSPaymentMethod,gotovina,gotovina,Gotovina,Cash payment method in Serbian rulebook,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005,Maps to TaxCorePaymentType Cash and may also be used as a fallback entry label when card check and instant are disabled in specific Serbia contexts
+ENUM-009,RSPaymentMethod,instant_placanje,instant plaćanje,Instant plaćanje,Instant payment at point of sale,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005; REF-001,Strongly supported crosswalk to TaxCorePaymentType MobileMoney based on KB-005 generic PaymentType list and REF-001 Serbian localization
+ENUM-010,RSPaymentMethod,platna_kartica,platna kartica,Platna kartica,Card payment,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005,Maps to TaxCorePaymentType Card
+ENUM-011,RSPaymentMethod,cek,ček,Ček,Check payment,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005,Maps to TaxCorePaymentType Check
+ENUM-012,RSPaymentMethod,prenos_na_racun,prenos na račun,Prenos na račun,Wire transfer or account transfer,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005; REF-001,Maps to TaxCorePaymentType WireTransfer
+ENUM-013,RSPaymentMethod,vaucer,vačer,Vaučer,Voucher and similar instruments,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005; REF-001,OCR may vary between vaucer and vačer and the protocol crosswalk is TaxCorePaymentType Voucher
+ENUM-014,RSPaymentMethod,drugo_bezgotovinsko_placanje,drugo bezgotovinsko plaćanje,Drugo bezgotovinsko plaćanje,Other allowed non cash payment,Receipt rendering and legal domain,no,normative,high,KB-003; KB-005; REF-001,Strongly supported crosswalk to TaxCorePaymentType Other based on KB-005 generic PaymentType list and REF-001 Serbian localization
+ENUM-015,TaxCoreInvoiceType,0,Normal,Normal,Standard sale or refund invoice type in the generic TaxCore contract,InvoiceRequest.invoiceType,no,official_spec,high,KB-006,
+ENUM-016,TaxCoreInvoiceType,1,ProForma,ProForma,Proforma invoice type in the generic TaxCore contract,InvoiceRequest.invoiceType,no,official_spec,high,KB-006,Examples also show Proforma casing
+ENUM-017,TaxCoreInvoiceType,2,Copy,Copy,Copy invoice type in the generic TaxCore contract,InvoiceRequest.invoiceType,no,official_spec,high,KB-006,
+ENUM-018,TaxCoreInvoiceType,3,Training,Training,Training invoice type in the generic TaxCore contract,InvoiceRequest.invoiceType,no,official_spec,high,KB-006,
+ENUM-019,TaxCoreInvoiceType,4,Advance,Advance,Advance invoice type in the generic TaxCore contract,InvoiceRequest.invoiceType,no,official_spec,high,KB-006,
+ENUM-020,TaxCoreTransactionType,0,Sale,Sale,Sale transaction type in the generic TaxCore contract,InvoiceRequest.transactionType,no,official_spec,high,KB-006,
+ENUM-021,TaxCoreTransactionType,1,Refund,Refund,Refund transaction type in the generic TaxCore contract,InvoiceRequest.transactionType,no,official_spec,high,KB-006,Serbian rulebook folds cancellation into this bucket
+ENUM-022,TaxCorePaymentType,0,Other,Other,Other payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005; REF-001,Serbian reference localization renders this as Drugo bezgotovinsko plaćanje
+ENUM-023,TaxCorePaymentType,1,Cash,Cash,Cash payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005,Serbian legal label is Gotovina
+ENUM-024,TaxCorePaymentType,2,Card,Card,Card payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005,Serbian legal label is Platna kartica
+ENUM-025,TaxCorePaymentType,3,Check,Check,Check payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005,Serbian legal label is Ček
+ENUM-026,TaxCorePaymentType,4,WireTransfer,WireTransfer,Wire transfer payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005; REF-001,Table text also appears as Wire Transfer and Serbian legal label is Prenos na račun
+ENUM-027,TaxCorePaymentType,5,Voucher,Voucher,Voucher payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005; REF-001,Serbian legal label is Vaučer
+ENUM-028,TaxCorePaymentType,6,MobileMoney,MobileMoney,Mobile money payment type in the generic TaxCore contract,PaymentItem.paymentType,no,official_spec,high,KB-006; KB-005; REF-001,Serbian reference localization renders this as Instant plaćanje
+ENUM-029,InvoiceOptionFlag,0,"0",Generate,Option value meaning generation is enabled,InvoiceOptions.omitQRCodeGen; InvoiceOptions.omitTextualRepresentation,no,official_spec,high,KB-006,
+ENUM-030,InvoiceOptionFlag,1,"1",Omit,Option value meaning generation is omitted,InvoiceOptions.omitQRCodeGen; InvoiceOptions.omitTextualRepresentation,no,official_spec,high,KB-006,
+ENUM-031,RSBuyerIdentificationCode,10,10,PIB kupca,Domaće pravno lice identifikovano PIB-om,BuyerIdentification,no,official_technical,high,KB-016; KB-005; KB-012,Guidance for SNPDV official purchases also points to the PIB-family buyer branch
+ENUM-032,RSBuyerIdentificationCode,11,11,JMBG,Domaće fizičko lice koje obavlja samostalnu delatnost identifikovano JMBG-om,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-033,RSBuyerIdentificationCode,12,12,PIB i JBKJS kupca,Domaće pravno lice identifikovano PIB-om i JBKJS-om,BuyerIdentification,no,official_technical,high,KB-016; KB-005,Payload format is PIB:JBKJS after the prefix
+ENUM-034,RSBuyerIdentificationCode,13,13,Kod penzionerske kartice,Fizičko lice imalac penzionerske kartice,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-035,RSBuyerIdentificationCode,14,14,PIB,Pravno lice ili preduzetnik sa poljoprivrednim gazdinstvom identifikovan PIB-om,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-036,RSBuyerIdentificationCode,15,15,JMBG,Domaće fizičko lice preduzetnik ili drugo lice sa poljoprivrednim gazdinstvom identifikovano JMBG-om,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-037,RSBuyerIdentificationCode,16,16,BPG,Fizičko lice identifikovano brojem poljoprivrednog gazdinstva,BuyerIdentification,no,official_technical,high,KB-016; KB-005,
+ENUM-038,RSBuyerIdentificationCode,20,20,Broj lične karte,Domaće fizičko lice identifikovano brojem lične karte,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-039,RSBuyerIdentificationCode,21,21,Broj izbegličke legitimacije,Domaće fizičko lice identifikovano brojem izbegličke legitimacije,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-040,RSBuyerIdentificationCode,22,22,EBS,Strano fizičko lice sa prijavljenim boravkom u Srbiji,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-041,RSBuyerIdentificationCode,23,23,Broj pasoša,Domaće fizičko lice identifikovano pasošem,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-042,RSBuyerIdentificationCode,30,30,Broj pasoša,Strano fizičko lice identifikovano pasošem,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-043,RSBuyerIdentificationCode,31,31,Broj diplomatske legitimacije ili LK,Strano fizičko lice diplomata,BuyerIdentification,no,official_technical,high,KB-016; KB-012,Guidance for LNPDV personal diplomatic purchases aligns this code with the diplomatic ID branch
+ENUM-044,RSBuyerIdentificationCode,32,32,Broj lične karte MKD,Strano fizičko lice identifikovano ličnom kartom iz Severne Makedonije,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-045,RSBuyerIdentificationCode,33,33,Broj lične karte MNE,Strano fizičko lice identifikovano ličnom kartom iz Crne Gore,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-046,RSBuyerIdentificationCode,34,34,Broj lične karte ALB,Strano fizičko lice identifikovano ličnom kartom iz Albanije,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-047,RSBuyerIdentificationCode,35,35,Broj lične karte BIH,Strano fizičko lice identifikovano ličnom kartom iz Bosne i Hercegovine,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-048,RSBuyerIdentificationCode,36,36,Broj lične karte po odluci,Strano fizičko lice identifikovano ličnom kartom iz EU ili CH ili NO ili IS,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-049,RSBuyerIdentificationCode,40,40,Strani TIN,Poreski identifikacioni broj izdat u inostranstvu,BuyerIdentification,no,official_technical,high,KB-016,
+ENUM-050,RSBuyerOptionalFieldCode,20,20,Broj SNPDV,Broj obrasca SNPDV,BuyerOptionalField,no,official_technical,high,KB-016; KB-012,Guidance links this optional field to official purchases by embassies and international organizations
+ENUM-051,RSBuyerOptionalFieldCode,21,21,Broj LNPDV,Broj obrasca LNPDV,BuyerOptionalField,no,official_technical,high,KB-016; KB-012,Guidance links this optional field to personal diplomatic purchases together with diplomatic-ID buyer identification
+ENUM-052,RSBuyerOptionalFieldCode,30,30,Broj PPO-PDV,Broj overe u Poreskoj upravi za PPO-PDV,BuyerOptionalField,no,official_technical,high,KB-016; KB-005,
+ENUM-053,RSBuyerOptionalFieldCode,31,31,Broj ZPPO-PDV,Broj overe u Poreskoj upravi za ZPPO-PDV,BuyerOptionalField,no,official_technical,high,KB-016,
+ENUM-054,RSBuyerOptionalFieldCode,32,32,Broj MPPO-PDV,Broj overe u Poreskoj upravi za MPPO-PDV,BuyerOptionalField,no,official_technical,high,KB-016,
+ENUM-055,RSBuyerOptionalFieldCode,33,33,Broj IPPO-PDV,Broj overe u Poreskoj upravi za IPPO-PDV,BuyerOptionalField,no,official_technical,high,KB-016,
+ENUM-056,RSBuyerOptionalFieldCode,50,50,Broj korporacijske kartice,Broj korporacijske kartice,BuyerOptionalField,no,official_technical,high,KB-016; KB-005,Payment method is always voucher in this flow
+ENUM-057,RSBuyerOptionalFieldCode,60,60,Vremenski period za refundaciju korporacijskih kartica,Kalendarski mesec za zbirnu refundaciju prethodno evidentiranih prometa korporacijskih kartica,BuyerOptionalField,no,official_technical,high,KB-016; KB-005,Format is 60:ddmmgggg_ddmmgggg
+ENUM-058,SecurityElementFormFactor,smart_card,pametna_kartica,Pametna kartica,Issued security element in smart-card form,SecurityElementFormFactor,no,normative,high,KB-011,
+ENUM-059,SecurityElementFormFactor,smart_sd_card,pametna_sd_kartica,Pametna SD kartica,Issued security element in smart SD card form,SecurityElementFormFactor,no,normative,high,KB-011,
+ENUM-060,SecurityElementFormFactor,usb_token,usb_token,USB token,Issued security element in USB token form,SecurityElementFormFactor,no,normative,high,KB-011,
+ENUM-061,SecurityElementFormFactor,pfx_file,zasticeni_fajl_pfx,PFX fajl,Issued security element in protected file form such as PFX,SecurityElementFormFactor,no,normative,high,KB-011,The rulebook gives PFX as the concrete example
+ENUM-062,SecurityElementCounterFamily,invoice_sequence,jedinstveni_redni_broj_racuna,Jedinstveni redni broj računa,Counter family for the unique sequential invoice number,SecurityElementCounterFamily,no,normative,high,KB-011,
+ENUM-063,SecurityElementCounterFamily,invoice_kind_transaction_sequence,po_vrsti_racuna_i_tipu_transakcije,Po vrsti računa i tipu transakcije,Counter family split by receipt kind and transaction type,SecurityElementCounterFamily,no,normative,high,KB-011,
+ENUM-064,SecurityElementCounterFamily,tax_rate_totals,promet_i_porez_po_stopama,Promet i porez po stopama,Counter family for turnover and tax totals by tax rate,SecurityElementCounterFamily,no,normative,high,KB-011,
+ENUM-065,SecurityElementCounterFamily,total_turnover_tax_totals,ukupna_vrednost_prometa_i_poreza,Ukupna vrednost prometa i poreza,Counter family for global turnover and tax totals,SecurityElementCounterFamily,no,normative,high,KB-011,
+ENUM-066,CertificateType,31,31,CertificateClassV31,Web or SSL certificate class 1 used in the broader TaxCore certificate family,CertificateMetadata.certificateType,no,reference_impl,medium,REF-006,Reference certificate library enumerates this class but the fiscal docs in this corpus focus on later classes
+ENUM-067,CertificateType,32,32,CertificateClassV32,HTTPS authentication certificate class 1 used for V-SDC HTTPS communication and POS HTTPS communication,CertificateMetadata.certificateType,no,reference_impl,high,REF-006,
+ENUM-068,CertificateType,33,33,CertificateClassV33,Sign-data certificate class 2 used for signing data on the secure-element applet,CertificateMetadata.certificateType,no,reference_impl,high,REF-006,
+ENUM-069,CertificateType,34,34,CertificateClassV34,HTTPS authentication certificate class 2 used for the PKI applet on the smart card,CertificateMetadata.certificateType,no,reference_impl,high,REF-006,
+ENUM-070,CertificateType,35,35,CertificateClassV35,Sign-data certificate class 1 used for V-SDC with additional options,CertificateMetadata.certificateType,no,reference_impl,high,REF-006,
+ENUM-071,CertificateType,36,36,CertificateClassV36,Encryption certificate class 1 used for proof-of-audit encryption and V-SDC internal-data cryptography,CertificateMetadata.certificateType,no,reference_impl,high,REF-006,
+ENUM-072,CertificateType,37,37,CertificateClassV37,HTTPS authentication certificate class 2 used for developers,CertificateMetadata.certificateType,no,reference_impl,medium,REF-006,
+ENUM-073,CertificateType,38,38,CertificateClassV38,Sign-data certificate class 2 used for the virtual developer secure element,CertificateMetadata.certificateType,no,reference_impl,medium,REF-006,
