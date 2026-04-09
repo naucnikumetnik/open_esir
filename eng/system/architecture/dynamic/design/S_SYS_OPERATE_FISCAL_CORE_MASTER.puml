@@ -1,0 +1,90 @@
+@startuml
+title Operate fiscal core — top system lifecycle master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Operator /\nBusiness Application" as ACT
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  boundary "ESIR" as ESIR <<component>>
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control  "V-SDC\n(TaxCore Cloud)" as VSDC <<external>>
+  entity   "SE\n(Security Element)" as SE <<external>>
+  entity   "PKI Applet /\nClient Certificate" as PKI <<external>>
+  control  "TaxCore.API Shared" as TCS <<external>>
+  control  "TaxCore Backend\n(E-SDC API)" as TCB <<external>>
+  boundary "Public Verification" as PV <<external>>
+end box
+
+note over ACT, PV #FFF8DC
+S_SYS_OPERATE_FISCAL_CORE_MASTER
+[semantics lifecycle_spine=true]
+end note
+
+note over ESIR, TCB
+  Top-level lifecycle master.
+  Each group below is elaborated by its own system scenario.
+  This diagram shows operational scope and sequencing,
+  not full protocol detail.
+end note
+
+group S1 "Establish bootstrap and configuration"
+  ref over ACT, ESIR, ESDC, PKI, TCS, TCB
+    S_SYS_BOOTSTRAP_AND_CONFIGURATION
+  end ref
+end
+
+group S2 "Establish readiness and operator recovery"
+  ref over ACT, ESIR, ESDC, SE
+    S_SYS_STATUS_AND_OPERATOR_RECOVERY
+  end ref
+end
+
+group S3 "Fiscalize invoice"
+  ref over ACT, ESIR, ESDC, VSDC, SE, TCB
+    S_SYS_FISCALIZE_INVOICE
+  end ref
+end
+
+group S4 "Maintain backend sync and command lifecycle"
+  ref over ESDC, TCB
+    S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+  end ref
+end
+
+group S5 "Maintain audit and proof lifecycle"
+  ref over ESDC, SE, TCB
+    S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+  end ref
+end
+
+group S6 "Expose public verification"
+  ref over ACT, ESIR, PV
+    S_SYS_PUBLIC_VERIFICATION
+  end ref
+end
+
+note over ESIR, ESDC
+  ESIR owns business-facing orchestration.
+  E-SDC owns secure-element interaction,
+  backend synchronization, audit transfer,
+  and proof-of-audit completion.
+end note
+
+note over TCS, TCB
+  Shared TaxCore services provide bootstrap data.
+  E-SDC backend provides token, commands,
+  audit submission, and proof-related backend flows.
+end note
+
+@enduml

@@ -1,0 +1,125 @@
+@startuml
+title Bootstrap and configuration acquisition — system master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Provisioning Trigger\n(Operator / Business App)" as PT
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  boundary "ESIR" as ESIR <<component>>
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity   "PKI Applet /\nClient Certificate" as PKI <<external>>
+  control  "TaxCore.API Shared" as TCS <<external>>
+  control  "TaxCore Backend\n(E-SDC API)" as TCB <<external>>
+end box
+
+note over PT, TCB #FFF8DC
+S_SYS_BOOTSTRAP_AND_CONFIGURATION
+[semantics lifecycle_spine=true]
+end note
+
+note over ESDC, TCB
+  Shared TaxCore services provide bootstrap data.
+  E-SDC backend provides token and initialization commands.
+  Backend URLs must not be hardcoded.
+
+  GetInitializationCommands here is bootstrap-time acquisition.
+  Ongoing command intake and backend alignment are covered by
+  S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE.
+end note
+
+group S1 "Provisioning trigger starts bootstrap"
+  PT -> ESIR : IF_SYS_ESIR_SERVICE.Bootstrap() -> BootstrapResult\n[step=S1.1]\n[connection use_port=P_PT_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_PT__ESIR__ESIR_SERVICE]
+  activate ESIR
+  ESIR -> ESDC : IF_SYS_ESDC_SERVICE.BootstrapOrRefresh() -> BootstrapResult\n[step=S1.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]
+  activate ESDC
+end
+
+group S2 "Resolve backend context"
+  ESDC -> ESDC : resolve backend base URL\n[step=S2.1]
+  ESDC -> PKI : read client certificate context\n[step=S2.2]
+end
+
+alt [COND=no_valid_taxcore_token]
+
+  group S3 "Acquire authentication token"
+    ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.RequestAuthenticationToken() -> AuthenticationTokenResponse\n[step=S3.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-028 · HTTPS GET /api/v3/sdc/token · client certificate]
+    activate TCB
+    TCB --> ESDC : [step=S3.1r]\n[vals result=AuthenticationTokenResponse(token, expiresAt)]
+    deactivate TCB
+    ESDC -> ESDC : cache token until expiresAt\n[step=S3.2]
+  end
+
+else [COND=valid_taxcore_token_present]
+
+  group S3a "Reuse cached authentication token"
+    ESDC -> ESDC : keep cached token\n[step=S3a.1]
+  end
+
+end
+
+group S4 "Read shared TaxCore bootstrap data"
+  ESDC -> TCS : IF_DEP_TAXCORE_SHARED.Environments() -> EnvironmentDescriptor[]\n[step=S4.1]\n[connection use_port=P_ESDC_USE_TAXCORE_SHARED; prov_port=P_TCS_PROV_TAXCORE_SHARED; conn=C_ESDC__TCS__TAXCORE_SHARED]\n[CTR-101 · HTTPS GET /api/v3/environments]
+  activate TCS
+  TCS --> ESDC : [step=S4.1r]\n[vals result=EnvironmentDescriptor[](name, url)]
+
+  ESDC -> TCS : IF_DEP_TAXCORE_SHARED.Configuration() -> TaxCoreConfigurationResponse\n[step=S4.2]\n[connection use_port=P_ESDC_USE_TAXCORE_SHARED; prov_port=P_TCS_PROV_TAXCORE_SHARED; conn=C_ESDC__TCS__TAXCORE_SHARED]\n[CTR-102 · HTTPS GET /api/v3/configuration]
+  TCS --> ESDC : [step=S4.2r]\n[vals result=TaxCoreConfigurationResponse]
+
+  ESDC -> TCS : IF_DEP_TAXCORE_SHARED.TaxRates() -> TaxRatesResponse\n[step=S4.3]\n[connection use_port=P_ESDC_USE_TAXCORE_SHARED; prov_port=P_TCS_PROV_TAXCORE_SHARED; conn=C_ESDC__TCS__TAXCORE_SHARED]\n[CTR-103 · HTTPS GET /api/v3/tax-rates]
+  TCS --> ESDC : [step=S4.3r]\n[vals result=TaxRatesResponse(currentTaxRates, allTaxRates)]
+
+  ESDC -> TCS : IF_DEP_TAXCORE_SHARED.EncryptionCertificate() -> EncryptionCertificateBase64\n[step=S4.4]\n[connection use_port=P_ESDC_USE_TAXCORE_SHARED; prov_port=P_TCS_PROV_TAXCORE_SHARED; conn=C_ESDC__TCS__TAXCORE_SHARED]\n[CTR-104 · HTTPS GET /api/v3/encryption-certificate]
+  TCS --> ESDC : [step=S4.4r]\n[vals result=EncryptionCertificateBase64]
+  deactivate TCS
+end
+
+group S5 "Pull initialization commands"
+  ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.GetInitializationCommands() -> Command[]\n[step=S5.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-029A · HTTPS GET /api/v3/sdc/commands · TaxCoreAuthenticationToken]
+  activate TCB
+  TCB --> ESDC : [step=S5.1r]\n[vals result=Command[](commandId, type, payload, uid)]
+  deactivate TCB
+end
+
+alt [COND=commands_present]
+
+  group S6 "Apply and acknowledge commands"
+    loop [for each command]
+      ESDC -> ESDC : apply command payload\n[step=S6.1]
+      alt [COND=command_applied_successfully]
+        ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S6.2]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-030 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+      else [COND=command_application_failed]
+        ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S6.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-030 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+        ESDC -> ESDC : mark degraded / pending review\n[step=S6.4]
+      end
+    end
+  end
+
+else [COND=no_commands_present]
+
+  group S6a "Continue without initialization commands"
+    ESDC -> ESDC : continue with shared bootstrap data only\n[step=S6a.1]
+  end
+
+end
+
+group S7 "Persist readiness state"
+  ESDC -> ESDC : persist bootstrap state\n[step=S7.1]
+  ESDC -> ESDC : derive readiness\n[step=S7.2]
+  ESDC --> ESIR : [step=S7.3]\n[vals result=BootstrapResult(ready | degraded | pending_operator_action)]
+  deactivate ESDC
+  ESIR --> PT : [step=S7.4]\n[vals result=BootstrapResult]
+  deactivate ESIR
+end
+
+@enduml

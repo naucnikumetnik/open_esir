@@ -1,0 +1,136 @@
+@startuml
+title Audit and proof lifecycle — system master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity   "SE\n(Security Element)" as SE <<external>>
+  control  "TaxCore Backend\n(E-SDC API)" as TCB <<external>>
+end box
+
+note over ESDC, TCB #FFF8DC
+S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+[semantics lifecycle_spine=true]
+end note
+
+note over ESDC, TCB
+  Audit is asynchronous.
+  Audit packages are submitted continuously when connectivity exists.
+  Proof-of-audit is a separate cycle built from Start Audit + Amount Status.
+end note
+
+group S1 "Detect pending audit obligations"
+  ESDC -> ESDC : detect pending AuditPackage backlog\n[step=S1.1]
+  ESDC -> ESDC : determine whether proof cycle should start\n[step=S1.2]
+end
+
+alt [COND=audit_package_pending_and_connectivity_available]
+
+  group S2 "Submit pending audit package"
+    ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditPackage(data:AuditPackage) -> AuditDataStatus\n[step=S2.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-401 · HTTPS POST /api/v3/sdc/audit · TaxCoreAuthenticationToken]
+    activate TCB
+    TCB --> ESDC : [step=S2.1r]\n[vals result=AuditDataStatus(status, commands)]
+    deactivate TCB
+  end
+
+  alt [COND=audit_response_contains_commands]
+
+    group S3 "Process commands returned with audit response"
+      loop [for each returned command]
+        ESDC -> ESDC : apply command payload\n[step=S3.1]
+
+        alt [COND=command_applied_successfully]
+          ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S3.2]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-402 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+        else [COND=command_application_failed]
+          ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S3.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-402 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+          ESDC -> ESDC : mark command outcome pending review\n[step=S3.4]
+        end
+      end
+    end
+
+  else [COND=no_commands_in_audit_response]
+
+    group S3a "Continue without returned commands"
+      ESDC -> ESDC : keep current command state\n[step=S3a.1]
+    end
+
+  end
+
+  group S4 "Determine audit package disposition"
+    alt [COND=audit_status == verified_delete_local]
+      ESDC -> ESDC : delete local AuditPackage copy\n[step=S4.1]
+    else [COND=audit_status == retryable]
+      ESDC -> ESDC : keep AuditPackage for retry\n[step=S4.2]
+    else [COND=audit_status == hold_non_retryable]
+      ESDC -> ESDC : retain AuditPackage without immediate resubmission\n[step=S4.3]
+    end
+  end
+
+else [COND=no_pending_audit_package_or_offline]
+
+  group S2a "Skip remote audit package submission"
+    ESDC -> ESDC : keep current audit backlog state\n[step=S2a.1]
+  end
+
+end
+
+alt [COND=proof_cycle_requested_or_due]
+
+  group S5 "Generate proof request inputs"
+    ESDC -> SE : IF_DEP_SECURE_ELEMENT.StartAuditApdu() -> AuditRequestPayload\n[step=S5.1]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+    activate SE
+    SE --> ESDC : [step=S5.1r]\n[vals result=AuditRequestPayload]
+
+    ESDC -> SE : IF_DEP_SECURE_ELEMENT.AmountStatusApdu() -> AmountStatusResponse\n[step=S5.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+    SE --> ESDC : [step=S5.2r]\n[vals result=AmountStatusResponse(sum, limit)]
+    deactivate SE
+
+    ESDC -> ESDC : compose ProofOfAuditRequest from auditRequestPayload, sum, limit\n[step=S5.3]
+  end
+
+  group S6 "Submit proof request"
+    ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditRequestPayload(data:ProofOfAuditRequest)\n[step=S6.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-403 · HTTPS POST /api/v3/sdc/audit-proof · TaxCoreAuthenticationToken]
+    activate TCB
+    TCB --> ESDC : [step=S6.1r]\n[vals result=HTTP 200 OK]
+    deactivate TCB
+  end
+
+  alt [COND=proof_command_available_via_backend_response]
+    group S7 "Complete proof cycle with returned command"
+      ESDC -> ESDC : wait for proof-related command through backend command channels\n[step=S7.1]
+      ESDC -> SE : IF_DEP_SECURE_ELEMENT.EndAuditApdu(proof:ProofOfAudit)\n[step=S7.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+      activate SE
+      SE --> ESDC : [step=S7.2r]\n[vals result=ok | apdu_error]
+      deactivate SE
+    end
+  else [COND=proof_not_yet_available]
+    group S7a "Keep proof pending"
+      ESDC -> ESDC : keep proof cycle pending until backend generates command\n[step=S7a.1]
+    end
+  end
+
+else [COND=proof_cycle_not_requested]
+
+  group S5a "Skip proof cycle"
+    ESDC -> ESDC : continue with audit backlog handling only\n[step=S5a.1]
+  end
+
+end
+
+group S8 "Close audit outcome"
+  ESDC -> ESDC : derive audit state\n[step=S8.1]
+  ESDC -> ESDC : expose outcome as audit_cleared | audit_retry_pending |\nproof_pending | degraded\n[step=S8.2]
+end
+
+@enduml

@@ -1,0 +1,147 @@
+@startuml
+title Backend sync and command lifecycle — system master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity   "PKI Applet /\nClient Certificate" as PKI <<external>>
+  control  "TaxCore Backend\n(E-SDC API)" as TCB <<external>>
+end box
+
+note over ESDC, TCB #FFF8DC
+S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+[semantics lifecycle_spine=true]
+end note
+
+note over ESDC, TCB
+  E-SDC owns backend authentication, online status reporting,
+  command intake, command acknowledgements,
+  and audit package submission.
+end note
+
+group S1 "Ensure backend authentication capability"
+  ESDC -> ESDC : check cached token validity\n[step=S1.1]
+
+  alt [COND=no_valid_taxcore_token]
+    ESDC -> PKI : read client certificate for TLS/auth\n[step=S1.2]
+
+    ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.RequestAuthenticationToken() -> AuthenticationTokenResponse\n[step=S1.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-301 · HTTPS GET /api/v3/sdc/token · client certificate]
+    activate TCB
+    TCB --> ESDC : [step=S1.3r]\n[vals result=AuthenticationTokenResponse(token, expiresAt)]
+    deactivate TCB
+
+    ESDC -> ESDC : cache token until expiresAt\n[step=S1.4]
+  else [COND=valid_taxcore_token_present]
+    ESDC -> ESDC : reuse cached token\n[step=S1.5]
+  end
+end
+
+group S2 "Announce online status"
+  ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyOnlineStatus(body:BooleanFlagBody) -> Command[]\n[step=S2.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-302 · HTTPS PUT /api/v3/sdc/status · TaxCoreAuthenticationToken]
+  activate TCB
+  TCB --> ESDC : [step=S2.1r]\n[vals result=Command[](commandId, type, payload, uid)]
+  deactivate TCB
+end
+
+alt [COND=commands_received_from_online_status]
+
+  group S3 "Process commands received with online status"
+    loop [for each command]
+      ESDC -> ESDC : apply command payload\n[step=S3.1]
+
+      alt [COND=command_applied_successfully]
+        ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S3.2]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+      else [COND=command_application_failed]
+        ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S3.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+        ESDC -> ESDC : mark command outcome pending review\n[step=S3.4]
+      end
+    end
+  end
+
+else [COND=no_commands_received_from_online_status]
+
+  group S3a "Continue without commands from online status"
+    ESDC -> ESDC : keep current backend-aligned state\n[step=S3a.1]
+  end
+
+end
+
+alt [COND=explicit_initialization_refresh_required]
+
+  group S4 "Pull initialization commands explicitly"
+    ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.GetInitializationCommands() -> Command[]\n[step=S4.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-304 · HTTPS GET /api/v3/sdc/commands · TaxCoreAuthenticationToken]
+    activate TCB
+    TCB --> ESDC : [step=S4.1r]\n[vals result=Command[](commandId, type, payload, uid)]
+    deactivate TCB
+
+    alt [COND=commands_received_from_explicit_pull]
+      loop [for each command]
+        ESDC -> ESDC : apply command payload\n[step=S4.2]
+
+        alt [COND=command_applied_successfully]
+          ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S4.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+        else [COND=command_application_failed]
+          ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S4.4]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+          ESDC -> ESDC : mark command outcome pending review\n[step=S4.5]
+        end
+      end
+    end
+  end
+
+end
+
+alt [COND=audit_package_pending_and_connectivity_available]
+
+  group S5 "Submit pending audit package"
+    ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditPackage(data:AuditPackage) -> AuditDataStatus\n[step=S5.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-305 · HTTPS POST /api/v3/sdc/audit · TaxCoreAuthenticationToken]
+    activate TCB
+    TCB --> ESDC : [step=S5.1r]\n[vals result=AuditDataStatus(status, commands)]
+    deactivate TCB
+
+    alt [COND=audit_response_contains_commands]
+      loop [for each returned command]
+        ESDC -> ESDC : apply command payload\n[step=S5.2]
+
+        alt [COND=command_applied_successfully]
+          ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S5.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+        else [COND=command_application_failed]
+          ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)\n[step=S5.4]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+          ESDC -> ESDC : mark command outcome pending review\n[step=S5.5]
+        end
+      end
+    end
+
+    alt [COND=audit_status == accepted_delete_local]
+      ESDC -> ESDC : delete local AuditPackage copy\n[step=S5.6a]
+    else [COND=audit_status == retryable]
+      ESDC -> ESDC : keep AuditPackage for retry\n[step=S5.6b]
+    else [COND=audit_status == non_retryable_hold]
+      ESDC -> ESDC : retain AuditPackage without immediate resubmission\n[step=S5.6c]
+    end
+  end
+
+else [COND=no_audit_package_pending_or_offline]
+
+  group S5a "Skip audit submission"
+    ESDC -> ESDC : keep current audit backlog state\n[step=S5a.1]
+  end
+
+end
+
+group S6 "Close backend sync outcome"
+  ESDC -> ESDC : derive backend-sync state\n[step=S6.1]
+  ESDC -> ESDC : expose outcome as synced | commands_pending | retry_pending | degraded\n[step=S6.2]
+end
+
+@enduml

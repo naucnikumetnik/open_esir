@@ -1,0 +1,127 @@
+@startuml
+title Status and operator recovery — system master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Operator /\nBusiness Application" as OP
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  boundary "ESIR" as ESIR <<component>>
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity   "SE\n(Security Element)" as SE <<external>>
+end box
+
+note over OP, SE #FFF8DC
+S_SYS_STATUS_AND_OPERATOR_RECOVERY
+[semantics lifecycle_spine=true]
+end note
+
+note over ESIR, ESDC
+  This scenario determines whether the system is ready
+  for invoice fiscalization and how it recovers from
+  operator-facing blocking conditions.
+end note
+
+note over ESDC, SE
+  Attention probes E-SDC availability.
+  GetStatus exposes current readiness.
+  VerifyPin unlocks Secure Element use when PIN is required.
+end note
+
+group S1 "Request readiness check"
+  OP -> ESIR : IF_SYS_ESIR_SERVICE.CheckReady() -> ReadinessResult\n[step=S1.1]\n[connection use_port=P_OP_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_OP__ESIR__ESIR_SERVICE]
+  activate ESIR
+  ESIR -> ESDC : IF_SYS_ESDC_SERVICE.CheckReady() -> ReadinessResult\n[step=S1.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]
+  activate ESDC
+end
+
+group S2 "Probe E-SDC availability"
+  ESDC -> ESDC : ensure local runtime is responsive\n[step=S2.1]
+  ESIR -> ESDC : IF_SYS_ESDC_SERVICE.Attention()\n[step=S2.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-201 · HTTP GET /api/v3/attention]
+end
+
+alt [COND=attention_failed]
+
+  group S2a "Handle unavailable E-SDC"
+    ESDC -> ESDC : mark state unavailable\n[step=S2a.1]
+    ESIR --> OP : [step=S2a.2]\n[vals result=ReadinessResult(unavailable)]
+    deactivate ESDC
+    deactivate ESIR
+  end
+
+else [COND=attention_ok]
+
+  group S3 "Read current status"
+    ESIR -> ESDC : IF_SYS_ESDC_SERVICE.GetStatus() -> StatusResponse\n[step=S3.1]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-202 · HTTP GET /api/v3/status]
+    ESDC --> ESIR : [step=S3.1r]\n[vals result=StatusResponse(isPinRequired, auditRequired, sdcDateTime, uid, gsc)]
+  end
+
+  group S4 "Evaluate recovery needs"
+    ESDC -> ESDC : check time synchronization state\n[step=S4.1]
+    ESDC -> ESDC : check Secure Element certificate validity window\n[step=S4.2]
+    ESDC -> ESDC : derive readiness class from status and local checks\n[step=S4.3]
+  end
+
+  alt [COND=auditRequired == true]
+
+    group S4a "Audit-required blocking condition"
+      ESDC -> ESDC : mark audit required\n[step=S4a.1]
+      ESIR --> OP : [step=S4a.2]\n[vals result=ReadinessResult(audit_required)]
+    end
+
+  else [COND=isPinRequired == true]
+
+    group S5 "Recover PIN-required state"
+      OP -> ESIR : IF_SYS_ESIR_SERVICE.VerifyPin(pin:PinPlainText) -> GeneralStatusCodeText\n[step=S5.1]\n[connection use_port=P_OP_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_OP__ESIR__ESIR_SERVICE]
+      ESIR -> ESDC : IF_SYS_ESDC_SERVICE.VerifyPin(pin:PinPlainText) -> GeneralStatusCodeText\n[step=S5.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-203 · HTTP POST /api/v3/pin]
+
+      alt [COND=pin_verify_ok]
+        ESDC -> SE : unlock active Secure Element session\n[step=S5.3]
+        ESDC -> ESDC : keep PIN/session context in volatile state\n[step=S5.4]
+        ESIR --> OP : [step=S5.5]\n[vals result=ReadinessResult(ready)]
+      else [COND=pin_verify_failed]
+        ESDC -> ESDC : mark pending operator action\n[step=S5.6]
+        ESIR --> OP : [step=S5.7]\n[vals result=ReadinessResult(pin_failed | se_locked | smart_card_missing)]
+      end
+    end
+
+  else [COND=time_or_certificate_invalid]
+
+    group S5a "Recover degraded time/certificate state"
+      ESDC -> ESDC : block fiscalization until local condition is resolved\n[step=S5a.1]
+      ESDC -> ESDC : expose notification to operator\n[step=S5a.2]
+      ESIR --> OP : [step=S5a.3]\n[vals result=ReadinessResult(degraded)]
+    end
+
+  else [COND=environment_refresh_requested]
+
+    group S5b "Refresh environment parameters"
+      ESIR -> ESDC : IF_SYS_ESDC_SERVICE.GetEnvironmentParameters() -> EnvironmentParametersResponse\n[step=S5b.1]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-204 · HTTP GET /api/v3/environment-parameters]
+      ESDC --> ESIR : [step=S5b.1r]\n[vals result=EnvironmentParametersResponse(environmentName, endpoints)]
+      ESIR --> OP : [step=S5b.2]\n[vals result=ReadinessResult(ready_with_environment_context)]
+    end
+
+  else [COND=ready_without_recovery]
+
+    group S5c "System already ready"
+      ESIR --> OP : [step=S5c.1]\n[vals result=ReadinessResult(ready)]
+    end
+
+  end
+
+  deactivate ESDC
+  deactivate ESIR
+
+end
+
+@enduml

@@ -1,0 +1,117 @@
+@startuml
+title Fiscalize invoice — system master (CSV-aligned update)
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Business Application\n(POS / ERP)" as BA
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  boundary "ESIR" as ESIR <<component>>
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control  "V-SDC\n(TaxCore Cloud)" as VSDC <<external>>
+  entity   "SE\n(Security Element)" as SE <<external>>
+  control  "TaxCore Backend\n(E-SDC API)" as TCB <<external>>
+end box
+
+note over BA, TCB #FFF8DC
+S_SYS_FISCALIZE_INVOICE
+[semantics lifecycle_spine=true]
+end note
+
+note over ESIR, ESDC
+  Both V-SDC and E-SDC expose the same Create Invoice contract
+  toward the invoicing system.
+
+  Path selection is based on configured fiscalization mode.
+  ESIR validates and prepares InvoiceRequest.
+  The selected SDC path returns InvoiceResult.
+end note
+
+group S1 "Business application submits invoice for fiscalization"
+  BA -> ESIR : IF_SYS_ESIR_SERVICE.Fiscalize(request:InvoiceRequest) -> InvoiceResult\n[step=S1.1]\n[connection use_port=P_BA_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_BA__ESIR__ESIR_SERVICE]
+  activate ESIR
+end
+
+group S2 "ESIR validates and prepares invoice request"
+  ESIR -> ESIR : validate invoice fields, buyer data, payment structure,\nmandatory elements and request consistency\n[step=S2.1]
+  ESIR -> ESIR : normalize and prepare InvoiceRequest for SDC path\n[step=S2.2]
+end
+
+alt [COND=configured_sdc_mode == V_SDC]
+
+  group S3a "Fiscalize via V-SDC"
+    ESIR -> VSDC : IF_DEP_TAXCORE_VSDC.CreateInvoice(request:InvoiceRequest) -> InvoiceResult\n[step=S3a.1]\n[connection use_port=P_ESIR_USE_TAXCORE_VSDC; prov_port=P_VSDC_PROV_TAXCORE_VSDC; conn=C_ESIR__VSDC__TAXCORE_VSDC]\n[CTR-001 · HTTPS POST /api/v3/invoices · client certificate + PAC]
+    activate VSDC
+
+    alt [COND=v_sdc_validation_or_operational_error]
+      VSDC --> ESIR : [step=S3a.1e]\n[vals error=ValidationErrorResponse | GENERAL_STATUS_CODE]
+    else [COND=v_sdc_success]
+      VSDC --> ESIR : [step=S3a.1r]\n[vals result=InvoiceResult(invoiceNumber, verificationUrl, journal)]
+    end
+
+    deactivate VSDC
+  end
+
+else [COND=configured_sdc_mode == E_SDC]
+
+  group S3b "Fiscalize via E-SDC"
+    ESIR -> ESDC : IF_SYS_ESDC_SERVICE.CreateInvoice(request:InvoiceRequest) -> InvoiceResult\n[step=S3b.1]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-001 · HTTP POST /api/v3/invoices · local]
+    activate ESDC
+
+    ESDC -> ESDC : verify request format/content and determine tax handling\n[step=S3b.2]
+    ESDC -> ESDC : check certificate validity / local fiscalization preconditions\n[step=S3b.3]
+
+    alt [COND=request_invalid_or_not_configured]
+      ESDC --> ESIR : [step=S3b.1e]\n[vals error=ValidationErrorResponse | GENERAL_STATUS_CODE]
+    else [COND=request_accepted_for_local_fiscalization]
+
+      ESDC -> SE : IF_DEP_SECURE_ELEMENT.SignInvoiceApdu(request:SignInvoiceApduRequest) -> SignInvoiceApduResponse\n[step=S3b.4]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]\n[CTR-011 · APDU CLA 0x88 INS 0x13]
+      activate SE
+
+      alt [COND=se_apdu_status != 0x9000]
+        SE --> ESDC : [step=S3b.4e]\n[vals error=SE_APDU_STATUS]
+        ESDC --> ESIR : [step=S3b.1e2]\n[vals error=SE_APDU_STATUS]
+      else [COND=se_sign_ok]
+        SE --> ESDC : [step=S3b.4r]\n[vals result=SignInvoiceApduResponse]
+        ESDC -> ESDC : create verification URL and textual journal\n[step=S3b.5]
+        ESDC -> ESDC : create and persist AuditPackage in local non-volatile storage\n[step=S3b.6]
+        ESDC -> ESDC : build InvoiceResult from signed data\n[step=S3b.7]
+        ESDC --> ESIR : [step=S3b.1r]\n[vals result=InvoiceResult(invoiceNumber, verificationUrl, journal)]
+      end
+
+      deactivate SE
+    end
+
+    deactivate ESDC
+  end
+
+end
+
+group S4 "ESIR returns fiscalization result to business application"
+  alt [COND=fiscalization_failed]
+    ESIR --> BA : [step=S4.1err]\n[vals error=ValidationErrorResponse | GENERAL_STATUS_CODE | SE_APDU_STATUS]
+    deactivate ESIR
+  else [COND=fiscalization_ok]
+    ESIR --> BA : [step=S4.1r]\n[vals result=InvoiceResult(invoiceNumber, verificationUrl, journal)]
+    deactivate ESIR
+  end
+end
+
+note over ESDC, TCB
+  Backend sync, command lifecycle, and audit/proof cycles
+  are asynchronous and fully owned by E-SDC.
+  See: S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+       S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+end note
+
+@enduml
