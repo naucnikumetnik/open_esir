@@ -1,0 +1,95 @@
+@startuml
+title Persist prepared execution intent to AIOS managed storage
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_RUNTIME_STORE_PUT_PREPARED_EXECUTION_INTENT
+end note
+
+note over SYS_RS, SYS_Tools
+  RuntimeStore owns prepared-execution-intent semantics.
+  ToolsAdapter provides the physical access path to AIOS managed storage.
+  Core validates intent shape before RuntimeStore serializes and writes it.
+end note
+
+group S1 "AgentRuntime requests prepared-intent persistence"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.put_prepared_execution_intent(ctx:CallContext, intent:PreparedExecutionIntent) -> Result[PreparedExecutionIntentRef]\n[step=S1.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals intent.execution_kind=intent.execution_kind; intent.review_policy=intent.review_policy; intent.target_ref=intent.target_ref; intent.planning_basis.basis_kind=intent.planning_basis.basis_kind; intent.planning_basis.task_seeds=intent.planning_basis.task_seeds; intent.source_artifact_kind=intent.source_artifact_kind; intent.realization_mode=intent.realization_mode]
+  activate SYS_RS
+
+  SYS_RS -> SYS_RS : allocate_prepared_intent_ref()\n[step=S1.2]\n[vals prepared_intent_ref=<prepared_intent_ref>]
+end
+
+group S2 "RuntimeStore validates and serializes prepared intent"
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S2.1]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="prepared_intent"; kind=ARTIFACT; content_type="application/json"; payload_any=intent}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate PreparedExecutionIntent before persistence."
+  end ref
+  SYS_Core --> SYS_RS : [step=S2.1r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S2.2]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PREPARED_INTENT_INVALID]
+    deactivate SYS_RS
+    stop
+  else [COND=INTENT_VALID]
+    SYS_RS -> SYS_RS : serialize_prepared_execution_intent(intent)\n[step=S2.3]\n[vals prepared_intent_json="<prepared_execution_intent_json>"]
+  end
+end
+
+group S3 "RuntimeStore ensures directory and writes prepared intent through ToolsAdapter"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.ensure_dir(ctx:CallContext, path:str) -> Result[WriteResult]\n[step=S3.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/prepared_intents"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_ENSURE_DIR
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S3.1r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_prepared_intent_write_error(result.err)\n[step=S3.2]\n[vals mapped_code=PREPARED_INTENT_PERSIST_FAILED]
+    SYS_RS --> SYS_AR : [step=S3.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PREPARED_INTENT_PERSIST_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S3.4]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/prepared_intents/<prepared_intent_ref>.json"; text="<prepared_execution_intent_json>"; expected_etag=null; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S3.4r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_prepared_intent_write_error(result.err)\n[step=S3.5]\n[vals mapped_code=PREPARED_INTENT_PERSIST_FAILED]
+    SYS_RS --> SYS_AR : [step=S3.6]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PREPARED_INTENT_PERSIST_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S4 "RuntimeStore returns prepared-intent reference"
+  SYS_RS --> SYS_AR : [step=S4.1]\n[vals result.outcome=ok; result.ok.prepared_intent_ref=<prepared_intent_ref>]
+  deactivate SYS_RS
+end
+
+@enduml

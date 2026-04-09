@@ -1,0 +1,161 @@
+package online.taxcore.pos.ui.settings.cashiers
+
+import android.annotation.SuppressLint
+import android.content.res.ColorStateList
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.core.content.ContextCompat
+import androidx.core.widget.ImageViewCompat
+import androidx.recyclerview.widget.RecyclerView
+import com.afollestad.materialdialogs.MaterialDialog
+import com.afollestad.materialdialogs.WhichButton
+import com.afollestad.materialdialogs.actions.setActionButtonEnabled
+import com.afollestad.materialdialogs.customview.customView
+import com.google.android.material.card.MaterialCardView
+import com.vicpin.krealmextensions.createOrUpdate
+import com.vicpin.krealmextensions.delete
+import com.vicpin.krealmextensions.query
+import com.vicpin.krealmextensions.queryFirst
+import io.realm.Case
+import online.taxcore.pos.R
+import online.taxcore.pos.data.realm.Cashier
+import online.taxcore.pos.databinding.CashiersRecyclerItemBinding
+import online.taxcore.pos.databinding.DialogAddCashierBinding
+import online.taxcore.pos.extensions.onTextChanged
+
+@SuppressLint("NotifyDataSetChanged")
+class CashiersAdapter : RecyclerView.Adapter<CashierViewHolder>() {
+
+    private var cashiersList = mutableListOf<Cashier>()
+
+    override fun getItemCount() = cashiersList.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CashierViewHolder {
+        val binding = CashiersRecyclerItemBinding.inflate(
+            LayoutInflater.from(parent.context), parent, false
+        )
+        return CashierViewHolder(binding)
+    }
+
+    override fun onBindViewHolder(holder: CashierViewHolder, position: Int) {
+        val ctx = holder.itemView.context
+        val currentCashier = cashiersList[position]
+
+        holder.bind(currentCashier)
+        holder.binding.cashierCard.setOnClickListener { view ->
+
+            var prevSelected = cashiersList.find { it.isChecked }
+            if (prevSelected?.uuid === currentCashier.uuid) {
+                return@setOnClickListener
+            }
+
+            (view as MaterialCardView).toggle()
+
+            if (prevSelected == null) {
+                prevSelected = Cashier().queryFirst { equalTo("isChecked", true) }
+            }
+
+            prevSelected?.isChecked = prevSelected?.isChecked?.not() ?: false
+            prevSelected?.createOrUpdate()
+
+            currentCashier.isChecked = currentCashier.isChecked.not()
+            currentCashier.createOrUpdate()
+            notifyDataSetChanged()
+        }
+
+        holder.binding.cashierDeleteButton.setOnClickListener {
+
+            MaterialDialog(ctx).show {
+                title(R.string.dialog_title_delete_cashier)
+                message(R.string.dialog_message_confirm_cashier_delete)
+                setActionButtonEnabled(WhichButton.POSITIVE, currentCashier.isChecked.not())
+
+                positiveButton(R.string.btn_delete_cashier) {
+                    currentCashier.delete {
+                        equalTo("id", currentCashier.id)
+                    }
+
+                    cashiersList.removeAt(position)
+
+                    notifyItemRangeChanged(position, cashiersList.size)
+                    notifyItemRemoved(position)
+
+                    Toast.makeText(context, context.getString(R.string.toast_cashier_deleted), Toast.LENGTH_SHORT).show()
+                }
+
+                negativeButton(R.string.btn_close)
+            }
+
+        }
+
+        holder.binding.cashierEditButton.setOnClickListener {
+
+            MaterialDialog(ctx).show {
+                title(R.string.dialog_title_edit_cashier)
+                val dialogBinding = DialogAddCashierBinding.inflate(LayoutInflater.from(ctx))
+                customView(view = dialogBinding.root)
+                setActionButtonEnabled(WhichButton.POSITIVE, false)
+
+                dialogBinding.addCashierNameInput.setText(currentCashier.name)
+                dialogBinding.addCashierIDInput.setText(currentCashier.id)
+
+                // Add input listener
+                dialogBinding.addCashierNameInput.onTextChanged { inputText ->
+                    val inputChanged = inputText != currentCashier.name
+                    setActionButtonEnabled(WhichButton.POSITIVE, inputText.isNotEmpty() and inputChanged)
+                }
+
+                dialogBinding.addCashierIDInput.onTextChanged { inputText ->
+                    val inputChanged = inputText != currentCashier.id
+                    setActionButtonEnabled(WhichButton.POSITIVE, inputText.isNotEmpty() and inputChanged)
+                }
+
+                negativeButton(R.string.btn_close)
+                positiveButton(R.string.dialog_button_save) {
+                    val cashierName = dialogBinding.addCashierNameInput.text.toString()
+                    val cashierId = dialogBinding.addCashierIDInput.text.toString()
+
+                    with(currentCashier) {
+                        name = cashierName
+                        id = cashierId
+                        createOrUpdate()
+                    }
+
+                    notifyItemChanged(position, currentCashier)
+
+                    Toast.makeText(context, context.getString(R.string.toast_cashier_updated), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun setData(arrayList: MutableList<Cashier>) {
+        this.cashiersList = arrayList
+        notifyDataSetChanged()
+    }
+
+    fun changeDataByFilter(pattern: String) {
+        cashiersList = Cashier().query {
+            contains("name", pattern, Case.INSENSITIVE).or()
+            contains("id", pattern, Case.INSENSITIVE)
+        }.toMutableList()
+        notifyDataSetChanged()
+    }
+}
+
+class CashierViewHolder(val binding: CashiersRecyclerItemBinding) : RecyclerView.ViewHolder(binding.root) {
+    fun bind(cashier: Cashier) {
+        binding.cashierNameLabel.text = cashier.name
+        binding.cashierIDLabel.text = "ID: ${cashier.id}"
+
+        binding.cashierCard.isChecked = cashier.isChecked
+        binding.cashierDeleteButton.isEnabled = cashier.isChecked.not()
+
+        val tintColor = if (cashier.isChecked) R.color.disabled else R.color.colorRed
+        val buttonTint = ContextCompat.getColor(itemView.context, tintColor)
+
+        ImageViewCompat.setImageTintList(binding.cashierDeleteButton, ColorStateList.valueOf(buttonTint))
+
+    }
+}

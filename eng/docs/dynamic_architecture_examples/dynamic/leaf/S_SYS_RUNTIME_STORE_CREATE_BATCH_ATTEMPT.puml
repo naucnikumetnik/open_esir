@@ -1,0 +1,197 @@
+@startuml
+title Create batch attempt record in AIOS managed storage
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_RUNTIME_STORE_CREATE_BATCH_ATTEMPT
+end note
+
+note over SYS_RS, SYS_Tools
+  RuntimeStore owns batch-attempt creation semantics.
+  ToolsAdapter provides the physical access path to AIOS managed storage.
+  Core validates stored and derived attempt artifacts before persistence.
+end note
+
+note over SYS_RS
+  This slice creates one durable attempt record for one batch execution unit.
+  Attempt numbering is derived from persisted runtime state.
+end note
+
+group S1 "AgentRuntime requests batch attempt creation"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.create_batch_attempt(ctx:CallContext, run_ref:str, task_id:str, batch_execution_unit_id:str) -> Result[BatchAttemptRef]\n[step=S1.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=run_ref; task_id=task_id; batch_execution_unit_id=batch_execution_unit_id]
+  activate SYS_RS
+
+  alt [COND=run_ref is null or malformed or task_id is null or malformed or batch_execution_unit_id is null or malformed]
+    SYS_RS --> SYS_AR : [step=S1.2]\n[vals result.outcome=err; result.err.category=INPUT; result.err.code=BATCH_ATTEMPT_REF_INVALID]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S2 "RuntimeStore loads, validates, and parses parent batch unit"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S2.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/tasks/<task_id>/batches/<batch_execution_unit_id>.json"; opts.encoding="utf-8"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_batch_execution_unit_read_error(result.err)\n[step=S2.2]\n[vals mapped_code=BATCH_EXECUTION_UNIT_UNAVAILABLE]
+    SYS_RS --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY); result.err.code=BATCH_EXECUTION_UNIT_UNAVAILABLE]
+    deactivate SYS_RS
+    stop
+  end
+
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S2.4]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="batch_execution_unit"; kind=ARTIFACT; content_type="application/json"; payload_text="<batch_execution_unit_json>"}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate parent batch execution-unit record before parse."
+  end ref
+  SYS_Core --> SYS_RS : [step=S2.4r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S2.5]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=BATCH_EXECUTION_UNIT_INVALID]
+    deactivate SYS_RS
+    stop
+  else [COND=UNIT_VALID]
+    SYS_RS -> SYS_RS : batch_unit=parse_batch_execution_unit("<batch_execution_unit_json>")\n[step=S2.6]
+  end
+
+  alt [COND=batch_unit.state not in {READY,PENDING,RETRYABLE_FAIL,NEEDS_CHANGE}]
+    SYS_RS --> SYS_AR : [step=S2.7]\n[vals result.outcome=err; result.err.category=CONFLICT; result.err.code=BATCH_EXECUTION_UNIT_NOT_ATTEMPTABLE]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S3 "RuntimeStore loads existing attempt index (or derives empty)"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S3.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/tasks/<task_id>/batches/<batch_execution_unit_id>/attempt_index.json"; opts.encoding="utf-8"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S3.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_attempt_index_read_error(result.err)\n[step=S3.2]\n[vals mapped_status=ATTEMPT_INDEX_UNAVAILABLE]
+    note over SYS_RS
+      Missing attempt_index.json is treated as no prior attempts.
+    end note
+    SYS_RS -> SYS_RS : attempt_index=derive_empty_attempt_index(batch_execution_unit_id)\n[step=S3.3]
+  else [COND=INDEX_READ_OK]
+    SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S3.4]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="attempt_index"; kind=ARTIFACT; content_type="application/json"; payload_text="<attempt_index_json>"}]]
+    ref over SYS_RS, SYS_Core
+      expand=S_SYS_CORE_VALIDATE
+      op=IF_SYS_CORE_SERVICE.validate
+      note="Validate attempt_index.json before parse."
+    end ref
+    SYS_Core --> SYS_RS : [step=S3.4r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+    alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+      SYS_RS --> SYS_AR : [step=S3.5]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=BATCH_ATTEMPT_CREATE_FAILED; result.err.data.reason=ATTEMPT_INDEX_INVALID]
+      deactivate SYS_RS
+      stop
+    else [COND=INDEX_VALID]
+      SYS_RS -> SYS_RS : attempt_index=parse_attempt_index("<attempt_index_json>")\n[step=S3.6]
+    end
+  end
+end
+
+group S4 "RuntimeStore derives new attempt record and validates it"
+  SYS_RS -> SYS_RS : derive_next_attempt_ordinal(attempt_index)\n[step=S4.1]\n[vals attempt_ordinal=<n_plus_one>; batch_attempt_ref="<batch_execution_unit_id>.attempt.<n_plus_one>"]
+  SYS_RS -> SYS_RS : derive_batch_attempt_record(run_ref, task_id, batch_execution_unit_id, batch_attempt_ref, attempt_ordinal, batch_unit)\n[step=S4.2]\n[vals attempt_record=<BatchAttemptRecord>; updated_attempt_index=<AttemptIndex>]
+
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S4.3]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="attempt_record"; kind=ARTIFACT; content_type="application/json"; payload_any=attempt_record}, {item_id="updated_attempt_index"; kind=ARTIFACT; content_type="application/json"; payload_any=updated_attempt_index}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate derived attempt artifacts before persistence."
+  end ref
+  SYS_Core --> SYS_RS : [step=S4.3r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S4.4]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=BATCH_ATTEMPT_CREATE_FAILED]
+    deactivate SYS_RS
+    stop
+  else [COND=ATTEMPT_ARTIFACTS_VALID]
+    SYS_RS -> SYS_RS : serialize_attempt_record(attempt_record)\n[step=S4.5]\n[vals attempt_record_json="<attempt_record_json>"]
+    SYS_RS -> SYS_RS : serialize_attempt_index(updated_attempt_index)\n[step=S4.6]\n[vals attempt_index_json="<attempt_index_json>"]
+  end
+end
+
+group S5 "RuntimeStore ensures attempts directory exists"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.ensure_dir(ctx:CallContext, path:str) -> Result[WriteResult]\n[step=S5.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/tasks/<task_id>/batches/<batch_execution_unit_id>/attempts"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_ENSURE_DIR
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S5.1r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    SYS_RS --> SYS_AR : [step=S5.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=BATCH_ATTEMPT_CREATE_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S6 "RuntimeStore writes attempt record and updated attempt index"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S6.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/tasks/<task_id>/batches/<batch_execution_unit_id>/attempts/<batch_attempt_ref>.json"; text="<attempt_record_json>"; expected_etag=null; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S6.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS --> SYS_AR : [step=S6.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=BATCH_ATTEMPT_CREATE_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S6.3]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/tasks/<task_id>/batches/<batch_execution_unit_id>/attempt_index.json"; text="<attempt_index_json>"; expected_etag=null; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S6.3r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    note over SYS_RS
+      Attempt record may already have been written while index update failed.
+      Creation is treated as failed to caller and recovered later by
+      idempotent index rebuild logic in a later slice.
+    end note
+    SYS_RS --> SYS_AR : [step=S6.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=BATCH_ATTEMPT_CREATE_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S7 "RuntimeStore returns batch attempt reference"
+  SYS_RS --> SYS_AR : [step=S7.1]\n[vals result.outcome=ok; result.ok.batch_attempt_ref=<batch_attempt_ref>; result.ok.attempt_ordinal=<attempt_ordinal>]
+  deactivate SYS_RS
+end
+
+@enduml

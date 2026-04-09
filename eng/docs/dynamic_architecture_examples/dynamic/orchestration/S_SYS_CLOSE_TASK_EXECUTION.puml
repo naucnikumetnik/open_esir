@@ -1,0 +1,175 @@
+@startuml
+title Close parent task execution from batch execution outcomes
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentRuntime" as SYS_AR <<component>>
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  control "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_CLOSE_TASK_EXECUTION
+[semantics scope={task_closure_only}; observability_effect=best_effort]
+end note
+
+note over SYS_AR
+  Closes the currently active parent task using persisted
+  batch execution-unit outcomes only.
+  No batch execution is performed here.
+end note
+
+group S1 "AgentRuntime begins task-closure evaluation"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S1.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_CLOSURE_EVALUATION_STARTED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok]
+end
+
+group S2 "AgentRuntime loads task closure context"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_task_closure_context(ctx:CallContext, run_ref:str, task_id:str) -> Result[TaskClosureContext]\n[step=S2.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=<run_ref>; task_id=<task_id>]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_GET_TASK_CLOSURE_CONTEXT
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=TASK_CLOSURE_CONTEXT_UNAVAILABLE; result.ok.status=(TASK_ALREADY_TERMINAL|TASK_CLOSURE_CONTEXT_READY)]
+
+  alt [COND=result.outcome=err and result.err.code=TASK_CLOSURE_CONTEXT_UNAVAILABLE]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_CLOSURE_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.reason=TASK_CLOSURE_CONTEXT_UNAVAILABLE]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.2r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION); result.err.code=TASK_CLOSURE_FAILED; result.err.reason=TASK_CLOSURE_CONTEXT_UNAVAILABLE; result.err.task_id=<task_id>]
+
+  else [COND=result.outcome=ok and result.ok.status=TASK_ALREADY_TERMINAL]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_CLOSURE_SKIPPED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.reason=TASK_ALREADY_TERMINAL]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.4r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_AR : [step=S2.5]\n[vals result.outcome=ok; result.ok.status=TASK_ALREADY_TERMINAL; result.ok.task_id=<task_id>; result.ok.task_state=<terminal_state>]
+
+  else [COND=result.outcome=ok and result.ok.status=TASK_CLOSURE_CONTEXT_READY]
+    group S3 "AgentRuntime derives parent-task outcome from persisted batch state"
+      SYS_AR -> SYS_AR : derive_task_closure_outcome(task_closure_ctx)\n[step=S3.1]\n[vals rules={all_required_batches_completed->COMPLETED; any_required_batch_failed->FAILED; unresolved_blocking_condition and no_required_batch_failed->BLOCKED; downstream_review_tasks_excluded=true}]\n[bind closure_outcome=derived.closure_outcome]
+
+      alt [COND=derived.closure_outcome=COMPLETED]
+        SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S3.2]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="run_task", run_ref=<run_ref>, id=<task_id>}; patch.preconditions.task_state=IN_PROGRESS; patch.ops=[set task_state=COMPLETED, set completed_at=<now>, set current_phase=TERMINAL]]
+        ref over SYS_RS, SYS_Tools, EXT_AIOS
+          expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+          ref_mode=call_return
+        end ref
+        SYS_RS --> SYS_AR : [step=S3.2r]\n[vals result.outcome=(ok|err)]
+
+        SYS_AR -> SYS_AR : classify_task_closure_patch(result, closure_outcome=COMPLETED)\n[step=S3.2c]\n[vals on_ok={status=TASK_CLOSED}; on_err={code=TASK_COMPLETION_PATCH_FAILED}]
+
+        alt [COND=classified.code=TASK_COMPLETION_PATCH_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.3]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_CLOSURE_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.reason=TASK_COMPLETION_PATCH_FAILED]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.3r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.4]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=TASK_CLOSURE_FAILED; result.err.reason=TASK_COMPLETION_PATCH_FAILED; result.err.task_id=<task_id>]
+
+        else [COND=classified.status=TASK_CLOSED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.5]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_COMPLETED; event.severity=INFO; event.visibility=both; event.user_msg="Task completed"; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.task_state=COMPLETED]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.5r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.6]\n[vals result.outcome=ok; result.ok.status=TASK_CLOSED; result.ok.task_id=<task_id>; result.ok.task_state=COMPLETED]
+        end
+
+      else [COND=derived.closure_outcome=FAILED]
+        SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S3.7]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="run_task", run_ref=<run_ref>, id=<task_id>}; patch.preconditions.task_state=IN_PROGRESS; patch.ops=[set task_state=FAILED, set failed_at=<now>, set current_phase=TERMINAL]]
+        ref over SYS_RS, SYS_Tools, EXT_AIOS
+          expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+          ref_mode=call_return
+        end ref
+        SYS_RS --> SYS_AR : [step=S3.7r]\n[vals result.outcome=(ok|err)]
+
+        SYS_AR -> SYS_AR : classify_task_closure_patch(result, closure_outcome=FAILED)\n[step=S3.7c]\n[vals on_ok={status=TASK_CLOSED}; on_err={code=TASK_FAILURE_PATCH_FAILED}]
+
+        alt [COND=classified.code=TASK_FAILURE_PATCH_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.8]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_CLOSURE_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.reason=TASK_FAILURE_PATCH_FAILED]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.8r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.9]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=TASK_CLOSURE_FAILED; result.err.reason=TASK_FAILURE_PATCH_FAILED; result.err.task_id=<task_id>]
+
+        else [COND=classified.status=TASK_CLOSED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.10]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_FAILED; event.severity=WARN; event.visibility=both; event.user_msg="Task failed"; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.task_state=FAILED]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.10r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.11]\n[vals result.outcome=ok; result.ok.status=TASK_CLOSED; result.ok.task_id=<task_id>; result.ok.task_state=FAILED]
+        end
+
+      else [COND=derived.closure_outcome=BLOCKED]
+        SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S3.12]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="run_task", run_ref=<run_ref>, id=<task_id>}; patch.preconditions.task_state=IN_PROGRESS; patch.ops=[set task_state=BLOCKED, set blocked_at=<now>, set current_phase=TERMINAL]]
+        ref over SYS_RS, SYS_Tools, EXT_AIOS
+          expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+          ref_mode=call_return
+        end ref
+        SYS_RS --> SYS_AR : [step=S3.12r]\n[vals result.outcome=(ok|err)]
+
+        SYS_AR -> SYS_AR : classify_task_closure_patch(result, closure_outcome=BLOCKED)\n[step=S3.12c]\n[vals on_ok={status=TASK_CLOSED}; on_err={code=TASK_BLOCK_PATCH_FAILED}]
+
+        alt [COND=classified.code=TASK_BLOCK_PATCH_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.13]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_CLOSURE_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.reason=TASK_BLOCK_PATCH_FAILED]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.13r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.14]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=TASK_CLOSURE_FAILED; result.err.reason=TASK_BLOCK_PATCH_FAILED; result.err.task_id=<task_id>]
+
+        else [COND=classified.status=TASK_CLOSED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.15]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TASK_BLOCKED; event.severity=WARN; event.visibility=both; event.user_msg="Task blocked"; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.task_state=BLOCKED]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.15r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.16]\n[vals result.outcome=ok; result.ok.status=TASK_CLOSED; result.ok.task_id=<task_id>; result.ok.task_state=BLOCKED]
+        end
+      end
+    end
+  end
+end
+
+@enduml

@@ -1,0 +1,321 @@
+@startuml
+title Execute one batch execution unit against project context and generation capability
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "AIOS — System Components" #F3F3F3
+  control  "AgentRuntime" as SYS_AR <<component>>
+  control  "RuntimeStore" as SYS_RS <<component>>
+  control  "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  control  "Core" as SYS_Core <<component>>
+  control  "AgentStore" as SYS_AS <<component>>
+  control  "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "Project Workspace\n(project artifacts)" as EXT_WS <<external>>
+  control  "Generation Capability\n(local or cloud)" as EXT_GEN <<external,optional>>
+end box
+
+note over SYS_AR, EXT_GEN #FFF8DC
+S_SYS_EXECUTE_BATCH_EXECUTION_UNIT
+end note
+
+note over SYS_AR
+  This scenario executes one runtime child batch execution unit.
+  The batch execution unit is task-compatible for execution purposes,
+  but remains a runtime-scoped child of a parent task.
+end note
+
+note over SYS_AR
+  System level intent:
+  - show boundary-visible execution dependencies
+  - keep internal execution-engine mechanics collapsed
+  - return one orchestration-visible execution outcome only
+  - persist one attempt evidence pack for both success and non-success outcomes
+  Observability emissions are best-effort and do not affect execution unit outcome.
+  AgentRuntime is the only system component that reads/writes target-project artifacts.
+  Internally, ArtifactIO owns that endpoint-aware access path.
+  Core consumes prepared refs and target-update requests only; it never touches target artifacts directly.
+  Generation remains a separate dependency path and is not modeled as a ToolBus filesystem capability.
+end note
+
+group S1 "AgentRuntime begins execution of one batch execution unit"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S1.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_UNIT_STARTED; event.severity=INFO; event.visibility=both; event.user_msg="Starting execution"; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok]
+end
+
+group S2 "AgentRuntime loads executable unit and required execution context"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_batch_execution_unit_payload(ctx:CallContext, run_ref:str, task_id:str, batch_execution_unit_id:str) -> Result[BatchExecutionUnitPayload]\n[step=S2.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=<run_ref>; task_id=<task_id>; batch_execution_unit_id=<batch_execution_unit_id>]
+  ref over SYS_AR, SYS_RS
+    expand=S_SYS_RUNTIME_STORE_GET_BATCH_EXECUTION_UNIT_PAYLOAD
+    ref_mode=call_return
+  end ref
+  SYS_RS --> SYS_AR : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=(BATCH_EXECUTION_UNIT_UNAVAILABLE|BATCH_EXECUTION_UNIT_INVALID)]
+
+  SYS_AR -> SYS_AR : classify_payload_fetch_outcome(result)\n[step=S2.1c]\n[vals on_ok={status=BATCH_EXECUTION_UNIT_READY}; on_err={status=FAILED; reason=BATCH_EXECUTION_UNIT_UNAVAILABLE}]
+
+  alt [COND=classified.status=FAILED]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_UNIT_FETCH_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.2r]\n[vals result.outcome=ok]
+
+    SYS_AR -> SYS_AR : [step=S2.3]\n[vals execution_outcome.status=FAILED; execution_outcome.reason=BATCH_EXECUTION_UNIT_UNAVAILABLE]
+
+  else [COND=classified.status=BATCH_EXECUTION_UNIT_READY]
+    SYS_AR -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_bytes(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadBytesResult]\n[step=S2.4]\n[connection use_port=P_AR_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AR__TOOLS__TOOL_BUS]\n[vals path in <referenced_workspace_artifact_paths_from_batch_execution_unit>]
+    ref over SYS_AR, SYS_Tools, EXT_WS
+      expand=S_SYS_TOOL_BUS_FS_READ_BYTES
+      ref_mode=call_return
+      note="System-level simplification: ArtifactIO owns referenced-artifact reads inside AgentRuntime; this scenario shows the local ToolBus filesystem branch."
+    end ref
+    SYS_Tools --> SYS_AR : [step=S2.4r]\n[vals result.outcome=(ok|err)]
+
+    SYS_AR -> SYS_AR : classify_ref_fetch_outcome(result)\n[step=S2.4c]\n[vals on_ok={status=EXECUTION_CONTEXT_READY}; on_err={status=FAILED; reason=REF_ARTIFACTS_UNAVAILABLE}]
+
+    alt [COND=classified.status=FAILED]
+      SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.5]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=REF_FETCH_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+      ref over SYS_AR, SYS_Obs
+        expand=S_SYS_OBSERVABILITY_EMIT
+        ref_mode=call_return
+      end ref
+      SYS_Obs --> SYS_AR : [step=S2.5r]\n[vals result.outcome=ok]
+
+      SYS_AR -> SYS_AR : [step=S2.6]\n[vals execution_outcome.status=FAILED; execution_outcome.reason=REF_ARTIFACTS_UNAVAILABLE]
+
+    else [COND=classified.status=EXECUTION_CONTEXT_READY]
+
+      group S3 "AgentRuntime validates inputs and prepares executable request"
+        SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.validate_and_prepare_execution(ctx:CallContext, batch_unit:any, refs:any, fw:FrameworkHandle) -> Result[PreparedExecutionRequest]\n[step=S3.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals batch_execution_unit_id=<batch_execution_unit_id>; refs.count=<n>]
+        ref over SYS_AR, SYS_Core
+          expand=S_SYS_CORE_VALIDATE_AND_PREPARE_EXECUTION
+          ref_mode=call_return
+        end ref
+        SYS_Core --> SYS_AR : [step=S3.1r]\n[vals result.outcome=(ok|err); result.err.code=EXECUTION_PREPARATION_FAILED; result.ok.status=EXECUTION_REQUEST_READY]
+
+        alt [COND=result.outcome=err and result.err.code=EXECUTION_PREPARATION_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PREPARATION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.2r]\n[vals result.outcome=ok]
+
+          SYS_AR -> SYS_AR : [step=S3.3]\n[vals execution_outcome.status=FAILED; execution_outcome.reason=EXECUTION_PREPARATION_FAILED]
+
+        else [COND=result.outcome=ok and result.ok.status=EXECUTION_REQUEST_READY]
+          SYS_AR -> SYS_AS : IF_SYS_AGENT_STORE.resolve_agent(ctx:CallContext, agent:AgentHandle) -> Result[ResolvedAgentConfig]\n[step=S3.4]\n[connection use_port=P_AR_USE_AGENT_STORE; prov_port=P_AS_PROV_AGENT_STORE; conn=C_AR__AS__AGENT_STORE]\n[vals agent=<resolved_candidate_or_policy_selected_agent>]
+          ref over SYS_AS, SYS_Tools, SYS_Core
+            expand=S_SYS_AGENT_STORE_RESOLVE_AGENT
+            ref_mode=call_return
+            op=IF_SYS_AGENT_STORE.resolve_agent
+          end ref
+          SYS_AS --> SYS_AR : [step=S3.4r]\n[vals result.outcome=(ok|err); result.err.code=AGENT_RESOLUTION_FAILED]
+
+          alt [COND=result.outcome=err and result.err.code=AGENT_RESOLUTION_FAILED]
+            SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.5]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=AGENT_RESOLVE_FAILED; event.severity=WARN; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+            ref over SYS_AR, SYS_Obs
+              expand=S_SYS_OBSERVABILITY_EMIT
+              ref_mode=call_return
+            end ref
+            SYS_Obs --> SYS_AR : [step=S3.5r]\n[vals result.outcome=ok]
+
+            SYS_AR -> SYS_AR : [step=S3.6]\n[vals execution_outcome.status=RETRYABLE_FAIL; execution_outcome.reason=AGENT_RESOLUTION_FAILED]
+          note over SYS_AR
+            Cache resolved agent handle + config for best-effort usage telemetry in S7.
+          end note
+          else [COND=result.outcome=ok]
+
+            group S4 "AgentRuntime invokes external generation dependency when needed"
+              opt [COND=execution_strategy.requires_generation=true]
+                SYS_AR -> EXT_GEN : IF_DEP_GENERATION.generate_candidate(ctx:CallContext, req:GenerateCandidateRequest) -> Result[GenerateCandidateResponse]\n[step=S4.1]\n[connection use_port=P_AR_USE_DEP_GENERATION; prov_port=P_GEN_PROV_DEP_GENERATION; conn=C_AR__GEN__DEP_GENERATION]\n[vals req.trace_ctx=<derived_trace_ctx>; req.generation_profile=<resolved_profile>; req.prompt_pack=<prepared_execution_request>]
+
+                alt [COND=result.outcome=err and result.err.code=GENERATION_FAILED]
+                  EXT_GEN --> SYS_AR : [step=S4.1errR]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=GENERATION_FAILED; result.err.retryable=true]
+
+                  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S4.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=GENERATION_FAILED; event.severity=WARN; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.retryable=true; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+                  ref over SYS_AR, SYS_Obs
+                    expand=S_SYS_OBSERVABILITY_EMIT
+                    ref_mode=call_return
+                  end ref
+                  SYS_Obs --> SYS_AR : [step=S4.2r]\n[vals result.outcome=ok]
+
+                  SYS_AR -> SYS_AR : [step=S4.3]\n[vals execution_outcome.status=RETRYABLE_FAIL; execution_outcome.reason=GENERATION_FAILED]
+
+                else [COND=result.outcome=err and result.err.code=GENERATION_FAILED_FATAL]
+                  EXT_GEN --> SYS_AR : [step=S4.1errF]\n[vals result.outcome=err; result.err.category=INTERNAL; result.err.code=GENERATION_FAILED_FATAL; result.err.retryable=false]
+
+                  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S4.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=GENERATION_FAILED_FATAL; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+                  ref over SYS_AR, SYS_Obs
+                    expand=S_SYS_OBSERVABILITY_EMIT
+                    ref_mode=call_return
+                  end ref
+                  SYS_Obs --> SYS_AR : [step=S4.4r]\n[vals result.outcome=ok]
+
+                  SYS_AR -> SYS_AR : [step=S4.5]\n[vals execution_outcome.status=FAILED; execution_outcome.reason=GENERATION_FAILED_FATAL]
+
+                else [COND=result.outcome=ok]
+                  EXT_GEN --> SYS_AR : [step=S4.1r]\n[vals result.outcome=ok; result.ok.payload=<generation_result>]
+                end
+              end
+            end
+
+            alt [COND=execution_outcome.status in {FAILED,RETRYABLE_FAIL}]
+              note over SYS_AR
+                Downstream target-update/application steps are skipped
+                because a non-success outcome was already decided.
+              end note
+
+            else [COND=execution_outcome not yet decided]
+
+              group S5 "AgentRuntime validates produced result and prepares target update"
+                SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.validate_and_build_target_update(ctx:CallContext, prepared:any, generation_result:any, fw:FrameworkHandle) -> Result[TargetUpdateRequest]\n[step=S5.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals batch_execution_unit_id=<batch_execution_unit_id>; generation_result=<payload_or_none>]
+                ref over SYS_AR, SYS_Core
+                  expand=S_SYS_CORE_VALIDATE_AND_BUILD_TARGET_UPDATE
+                  ref_mode=call_return
+                end ref
+                SYS_Core --> SYS_AR : [step=S5.1r]\n[vals result.outcome=(ok|err); result.err.code=TARGET_UPDATE_PREPARATION_FAILED; result.ok.status=(TARGET_UPDATE_READY|NEEDS_CHANGE)]
+
+                alt [COND=result.outcome=ok and result.ok.status=NEEDS_CHANGE]
+                  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=LLM_OUTPUT_INVALID; event.severity=WARN; event.visibility=both; event.user_msg="Execution output invalid — needs change"; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+                  ref over SYS_AR, SYS_Obs
+                    expand=S_SYS_OBSERVABILITY_EMIT
+                    ref_mode=call_return
+                  end ref
+                  SYS_Obs --> SYS_AR : [step=S5.2r]\n[vals result.outcome=ok]
+
+                  SYS_AR -> SYS_AR : [step=S5.3]\n[vals execution_outcome.status=NEEDS_CHANGE; execution_outcome.reason=OUTPUT_INVALID]
+
+                else [COND=result.outcome=err and result.err.code=TARGET_UPDATE_PREPARATION_FAILED]
+                  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=TARGET_UPDATE_PREPARATION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+                  ref over SYS_AR, SYS_Obs
+                    expand=S_SYS_OBSERVABILITY_EMIT
+                    ref_mode=call_return
+                  end ref
+                  SYS_Obs --> SYS_AR : [step=S5.4r]\n[vals result.outcome=ok]
+
+                  SYS_AR -> SYS_AR : [step=S5.5]\n[vals execution_outcome.status=FAILED; execution_outcome.reason=TARGET_UPDATE_PREPARATION_FAILED]
+
+                else [COND=result.outcome=ok and result.ok.status=TARGET_UPDATE_READY]
+
+                  group S6 "AgentRuntime applies produced change to target artifact (local workspace branch)"
+                    SYS_AR -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_bytes(ctx:CallContext, path:str, bytes:any, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S6.1]\n[connection use_port=P_AR_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AR__TOOLS__TOOL_BUS]\n[vals path=<resolved_workspace_target_path>; bytes=<updated_artifact_blob>; expected_etag=<optional>; opts.atomic=true]
+                    ref over SYS_AR, SYS_Tools, EXT_WS
+                      expand=S_SYS_TOOL_BUS_FS_WRITE_BYTES
+                      ref_mode=call_return
+                      note="System-level simplification: ArtifactIO owns target-artifact writes inside AgentRuntime; non-local endpoint branches are modeled later through endpoint-aware artifact access."
+                    end ref
+                    SYS_Tools --> SYS_AR : [step=S6.1r]\n[vals result.outcome=(ok|err); result.err.code=(FS_WRITE_FAILED|FS_ETAG_CONFLICT)]
+
+                    SYS_AR -> SYS_AR : classify_artifact_write_outcome(result)\n[step=S6.1c]\n[vals on_ok={status=TARGET_WRITE_OK}; on_err={status=FAILED; reason=WRITE_FAILED}]
+
+                    alt [COND=classified.status=FAILED]
+                      SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S6.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=ARTIFACT_WRITE_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+                      ref over SYS_AR, SYS_Obs
+                        expand=S_SYS_OBSERVABILITY_EMIT
+                        ref_mode=call_return
+                      end ref
+                      SYS_Obs --> SYS_AR : [step=S6.2r]\n[vals result.outcome=ok]
+
+                      SYS_AR -> SYS_AR : [step=S6.3]\n[vals execution_outcome.status=FAILED; execution_outcome.reason=WRITE_FAILED]
+
+                    else [COND=classified.status=TARGET_WRITE_OK]
+                      SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S6.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=ARTIFACT_WRITTEN; event.severity=INFO; event.visibility=both; event.user_msg="Execution unit applied"; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>]
+                      ref over SYS_AR, SYS_Obs
+                        expand=S_SYS_OBSERVABILITY_EMIT
+                        ref_mode=call_return
+                      end ref
+                      SYS_Obs --> SYS_AR : [step=S6.4r]\n[vals result.outcome=ok]
+
+                      SYS_AR -> SYS_AR : [step=S6.5]\n[vals execution_outcome.status=DONE; execution_outcome.reason=SUCCESS]
+                    end
+                  end
+
+                end
+              end
+
+            end
+          end
+        end
+      end
+
+    end
+  end
+end
+
+group S7 "AgentRuntime records execution evidence for this attempt"
+  SYS_AR -> SYS_AR : derive_execution_evidence_pack(execution_outcome, batch_execution_unit_id, batch_attempt_ref)\n[step=S7.1]\n[vals derive={attempt_status=execution_outcome.status; reason=execution_outcome.reason; partial_context?, generation_summary?, target_update_summary?, write_summary?, timestamps}]
+  note over SYS_AR
+    Failed and retryable attempts also produce durable evidence.
+    Exact evidence contents are not expanded here.
+  end note
+
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.put_evidence_blob(ctx:CallContext, run_ref:str, task_id:str, batch_execution_unit_id:str, batch_attempt_ref:str, evidence:any) -> Result[EvidenceRef]\n[step=S7.2]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=<run_ref>; task_id=<task_id>; batch_execution_unit_id=<batch_execution_unit_id>; batch_attempt_ref=<batch_attempt_ref>; evidence=<execution_evidence_pack>]
+  SYS_RS --> SYS_AR : [step=S7.2r]\n[vals result.outcome=(ok|err); result.err.code=EVIDENCE_WRITE_FAILED]
+
+  alt [COND=result.outcome=err and result.err.code=EVIDENCE_WRITE_FAILED]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S7.3]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EVIDENCE_WRITE_FAILED; event.severity=WARN; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>; event.data.attempt_status=execution_outcome.status]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S7.3r]\n[vals result.outcome=ok]
+
+  else [COND=result.outcome=ok]
+  end
+
+  opt [COND=agent_usage_recording_enabled=true]
+    SYS_AR -> SYS_AR : derive_agent_usage_event(agent=<resolved_candidate_or_policy_selected_agent>, agent_cfg=<resolved_agent_cfg>, execution_outcome, batch_execution_unit_id, batch_attempt_ref)\n[step=S7.4]\n[vals usage={attempt_status=execution_outcome.status; reason=execution_outcome.reason; tokens_in?; tokens_out?; latency_ms?; provider_kind?; model_id?}]
+    note over SYS_AR
+      Best-effort: Agent usage recording MUST NOT affect execution unit outcome.
+    end note
+
+    SYS_AR -> SYS_AS : IF_SYS_AGENT_STORE.record_agent_usage(ctx:CallContext, agent:AgentHandle, usage:any) -> Result[Ack]\n[step=S7.5]\n[connection use_port=P_AR_USE_AGENT_STORE; prov_port=P_AS_PROV_AGENT_STORE; conn=C_AR__AS__AGENT_STORE]\n[vals agent=<resolved_candidate_or_policy_selected_agent>; usage=<agent_usage_event>]
+    ref over SYS_AS, SYS_Tools, SYS_Core, EXT_AIOS
+      expand=S_SYS_AGENT_STORE_RECORD_AGENT_USAGE
+      ref_mode=call_return
+    end ref
+    SYS_AS --> SYS_AR : [step=S7.5r]\n[vals result.outcome=(ok|err); result.err.code=AGENT_USAGE_RECORD_FAILED]
+
+    alt [COND=result.outcome=err and result.err.code=AGENT_USAGE_RECORD_FAILED]
+      SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S7.6]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=AGENT_USAGE_RECORD_FAILED; event.severity=WARN; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.batch_attempt_ref=<batch_attempt_ref>; event.data.agent=<resolved_candidate_or_policy_selected_agent>]
+      ref over SYS_AR, SYS_Obs
+        expand=S_SYS_OBSERVABILITY_EMIT
+        ref_mode=call_return
+      end ref
+      SYS_Obs --> SYS_AR : [step=S7.6r]\n[vals result.outcome=ok]
+    else [COND=result.outcome=ok]
+    end
+  end
+end
+
+group S8 "AgentRuntime returns orchestration-visible outcome"
+  alt [COND=execution_outcome.status=DONE]
+    SYS_AR --> SYS_AR : [step=S8.1]\n[vals result.outcome=ok; result.ok.status=DONE; result.ok.reason=SUCCESS]
+
+  else [COND=execution_outcome.status=RETRYABLE_FAIL]
+    SYS_AR --> SYS_AR : [step=S8.2]\n[vals result.outcome=ok; result.ok.status=RETRYABLE_FAIL; result.ok.reason=execution_outcome.reason]
+
+  else [COND=execution_outcome.status=NEEDS_CHANGE]
+    SYS_AR --> SYS_AR : [step=S8.3]\n[vals result.outcome=ok; result.ok.status=NEEDS_CHANGE; result.ok.reason=execution_outcome.reason]
+
+  else [COND=execution_outcome.status=FAILED]
+    SYS_AR --> SYS_AR : [step=S8.4]\n[vals result.outcome=ok; result.ok.status=FAILED; result.ok.reason=execution_outcome.reason]
+  end
+end
+
+@enduml

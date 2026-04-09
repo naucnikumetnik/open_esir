@@ -1,0 +1,259 @@
+@startuml
+title Execute task batch execution units with bounded attempts
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentRuntime" as SYS_AR <<component>>
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  control "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_EXECUTE_TASK_BATCH_WITH_ATTEMPTS
+[semantics scope={batch_execution_with_attempts}; no_parallelism=true; one_active_parent_task=true; one_dispatchable_unit_at_a_time=true; retry_policy=orchestration_owned; observability_effect=best_effort]
+end note
+
+note over SYS_AR
+  Executes runtime child batch execution units for the currently
+  active parent task, one by one, with bounded attempts.
+  Retry ownership remains here:
+  after each persisted attempt outcome, control returns to persisted
+  next-unit selection. There is no inner retry loop on stale memory state.
+end note
+
+group S1 "AgentRuntime begins batch-execution phase"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S1.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_PHASE_STARTED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok]
+end
+
+loop [COND=task_state=IN_PROGRESS and batch_phase_ended=false]
+  group S2 "AgentRuntime selects next dispatchable batch execution unit from persisted runtime state"
+    SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_next_batch_execution_unit(ctx:CallContext, run_ref:str, task_id:str) -> Result[BatchExecutionUnitDispatchContext]\n[step=S2.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=<run_ref>; task_id=<task_id>]
+
+    ref over SYS_RS, SYS_Tools, EXT_AIOS
+      expand=S_SYS_RUNTIME_STORE_GET_NEXT_BATCH_EXECUTION_UNIT
+      ref_mode=call_return
+    end ref
+
+    SYS_RS --> SYS_AR : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=(TASK_RUNTIME_INDEX_UNAVAILABLE|TASK_RUNTIME_INDEX_INVALID|TASK_NOT_READY_FOR_BATCH_EXECUTION|BATCH_EXECUTION_UNIT_INDEX_UNAVAILABLE|BATCH_EXECUTION_UNIT_INDEX_INVALID|BATCH_EXECUTION_UNIT_UNAVAILABLE|BATCH_EXECUTION_UNIT_INVALID); result.ok.status=(NO_DISPATCHABLE_BATCH_EXECUTION_UNIT|BATCH_EXECUTION_UNIT_READY); result.ok.batch_execution_unit_id=<batch_execution_unit_id?>; result.ok.parent_task_id=<task_id>; result.ok.attempts_used=<n?>; result.ok.max_attempts=<max?>; result.ok.execution_payload_ref=<ref?>]
+
+    alt [COND=result.outcome=err]
+      SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.reason=<result.err.code>]
+      ref over SYS_AR, SYS_Obs
+        expand=S_SYS_OBSERVABILITY_EMIT
+        ref_mode=call_return
+      end ref
+      SYS_Obs --> SYS_AR : [step=S2.2r]\n[vals result.outcome=ok]
+
+      SYS_AR --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=BATCH_EXECUTION_UNIT_CONTEXT_UNAVAILABLE; result.err.task_id=<task_id>]
+      break
+
+    else [COND=result.outcome=ok and result.ok.status=NO_DISPATCHABLE_BATCH_EXECUTION_UNIT]
+      SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=NO_MORE_BATCH_EXECUTION_UNITS; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>]
+      ref over SYS_AR, SYS_Obs
+        expand=S_SYS_OBSERVABILITY_EMIT
+        ref_mode=call_return
+      end ref
+      SYS_Obs --> SYS_AR : [step=S2.4r]\n[vals result.outcome=ok]
+
+      SYS_AR --> SYS_AR : [step=S2.5]\n[vals result.outcome=ok; result.ok.status=BATCH_PHASE_COMPLETED; result.ok.reason=NO_MORE_BATCH_EXECUTION_UNITS; result.ok.task_id=<task_id>]
+      break
+
+    else [COND=result.outcome=ok and result.ok.status=BATCH_EXECUTION_UNIT_READY]
+      SYS_AR --> SYS_AR : [step=S2.6]\n[bind batch_execution_unit_id=result.ok.batch_execution_unit_id; attempts_used_before=result.ok.attempts_used; max_attempts=result.ok.max_attempts; execution_payload_ref=result.ok.execution_payload_ref]
+
+      group S3 "AgentRuntime creates next attempt and marks batch active"
+        SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.create_batch_attempt(ctx:CallContext, run_ref:str, task_id:str, batch_execution_unit_id:str) -> Result[BatchAttemptRef]\n[step=S3.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=<run_ref>; task_id=<task_id>; batch_execution_unit_id=<batch_execution_unit_id>]
+
+        ref over SYS_RS, SYS_Tools, EXT_AIOS
+          expand=S_SYS_RUNTIME_STORE_CREATE_BATCH_ATTEMPT
+          ref_mode=call_return
+        end ref
+
+        SYS_RS --> SYS_AR : [step=S3.1r]\n[vals result.outcome=(ok|err); result.err.code=BATCH_ATTEMPT_CREATE_FAILED; result.ok.attempt_ordinal=<attempt_ordinal>]
+
+        alt [COND=result.outcome=err and result.err.code=BATCH_ATTEMPT_CREATE_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_ATTEMPT_CREATE_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.2r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_AR : [step=S3.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=BATCH_ATTEMPT_CREATE_FAILED; result.err.task_id=<task_id>; result.err.batch_execution_unit_id=<batch_execution_unit_id>]
+          break
+
+        else [COND=result.outcome=ok]
+          SYS_AR --> SYS_AR : [step=S3.4]\n[bind attempt_ordinal=result.ok.attempt_ordinal]
+
+          SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S3.5]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="batch_execution_unit", id=<batch_execution_unit_id>}; patch.preconditions.batch_state in {PENDING,READY,RETRYABLE_FAIL,NEEDS_CHANGE}; patch.ops=[set batch_state=IN_PROGRESS, set active_attempt_ref=<attempt_ordinal>]]
+          ref over SYS_RS, SYS_Tools, EXT_AIOS
+            expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+            ref_mode=call_return
+          end ref
+
+          SYS_RS --> SYS_AR : [step=S3.5r]\n[vals result.outcome=(ok|err)]
+
+          SYS_AR -> SYS_AR : classify_batch_activation_outcome(result)\n[step=S3.5c]\n[vals on_ok={status=BATCH_ACTIVE}; on_err={code=BATCH_ACTIVATION_PATCH_FAILED}]
+
+          alt [COND=classified.code=BATCH_ACTIVATION_PATCH_FAILED]
+            SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.6]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.reason=BATCH_ACTIVATION_PATCH_FAILED]
+            ref over SYS_AR, SYS_Obs
+              expand=S_SYS_OBSERVABILITY_EMIT
+              ref_mode=call_return
+            end ref
+            SYS_Obs --> SYS_AR : [step=S3.6r]\n[vals result.outcome=ok]
+
+            SYS_AR --> SYS_AR : [step=S3.7]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=BATCH_ACTIVATION_PATCH_FAILED; result.err.task_id=<task_id>; result.err.batch_execution_unit_id=<batch_execution_unit_id>]
+            break
+
+          else [COND=classified.status=BATCH_ACTIVE]
+            SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.8]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_ATTEMPT_STARTED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.max_attempts=<max_attempts>]
+            ref over SYS_AR, SYS_Obs
+              expand=S_SYS_OBSERVABILITY_EMIT
+              ref_mode=call_return
+            end ref
+            SYS_Obs --> SYS_AR : [step=S3.8r]\n[vals result.outcome=ok]
+
+            group S4 "AgentRuntime executes selected batch execution unit"
+              ref over SYS_AR, SYS_Tools, SYS_RS, SYS_Obs
+                expand=S_SYS_EXECUTE_BATCH_EXECUTION_UNIT
+                ref_mode=call_return
+              end ref
+            end
+
+            alt [COND=result.outcome=err]
+              SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S4.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.reason=EXECUTION_UNIT_STEP_FAILED]
+              ref over SYS_AR, SYS_Obs
+                expand=S_SYS_OBSERVABILITY_EMIT
+                ref_mode=call_return
+              end ref
+              SYS_Obs --> SYS_AR : [step=S4.1r]\n[vals result.outcome=ok]
+
+              SYS_AR --> SYS_AR : [step=S4.2]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=EXECUTION_UNIT_STEP_FAILED; result.err.task_id=<task_id>; result.err.batch_execution_unit_id=<batch_execution_unit_id>]
+              break
+
+            else [COND=result.outcome=ok]
+              SYS_AR -> SYS_AR : classify_attempt_execution_outcome(result, attempt_ordinal, max_attempts)\n[step=S4.3]\n[vals rules={DONE->BATCH_EXECUTION_SUCCEEDED; (RETRYABLE_FAIL|NEEDS_CHANGE) and attempt_ordinal<max_attempts->BATCH_EXECUTION_RETRYABLE; FAILED->BATCH_EXECUTION_TERMINAL_FAILURE; (RETRYABLE_FAIL|NEEDS_CHANGE) and attempt_ordinal>=max_attempts->BATCH_EXECUTION_TERMINAL_FAILURE}]
+
+              group S5 "AgentRuntime persists attempt outcome and decides next orchestration step"
+                alt [COND=classified.attempt_outcome=BATCH_EXECUTION_SUCCEEDED]
+                  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S5.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="batch_execution_unit", id=<batch_execution_unit_id>}; patch.preconditions.batch_state=IN_PROGRESS; patch.ops=[set batch_state=COMPLETED, clear active_attempt_ref, set last_attempt_ordinal=<attempt_ordinal>, set completed_at=<now>]]
+                  ref over SYS_RS, SYS_Tools, EXT_AIOS
+                    expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+                    ref_mode=call_return
+                  end ref
+                  SYS_RS --> SYS_AR : [step=S5.1r]\n[vals result.outcome=(ok|err)]
+
+                  SYS_AR -> SYS_AR : classify_batch_completion_patch_outcome(result)\n[step=S5.1c]\n[vals on_ok={status=BATCH_STATE_PERSISTED}; on_err={code=BATCH_COMPLETION_PATCH_FAILED}]
+
+                  alt [COND=classified.code=BATCH_COMPLETION_PATCH_FAILED]
+                    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.reason=BATCH_COMPLETION_PATCH_FAILED]
+                    ref over SYS_AR, SYS_Obs
+                      expand=S_SYS_OBSERVABILITY_EMIT
+                      ref_mode=call_return
+                    end ref
+                    SYS_Obs --> SYS_AR : [step=S5.2r]\n[vals result.outcome=ok]
+
+                    SYS_AR --> SYS_AR : [step=S5.3]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=BATCH_COMPLETION_PATCH_FAILED; result.err.task_id=<task_id>; result.err.batch_execution_unit_id=<batch_execution_unit_id>]
+                    break
+
+                  else [COND=classified.status=BATCH_STATE_PERSISTED]
+                    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_UNIT_COMPLETED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>]
+                    ref over SYS_AR, SYS_Obs
+                      expand=S_SYS_OBSERVABILITY_EMIT
+                      ref_mode=call_return
+                    end ref
+                    SYS_Obs --> SYS_AR : [step=S5.4r]\n[vals result.outcome=ok]
+                  end
+
+                else [COND=classified.attempt_outcome=BATCH_EXECUTION_RETRYABLE]
+                  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S5.5]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="batch_execution_unit", id=<batch_execution_unit_id>}; patch.preconditions.batch_state=IN_PROGRESS; patch.ops=[set batch_state=(RETRYABLE_FAIL|NEEDS_CHANGE), clear active_attempt_ref, set last_attempt_ordinal=<attempt_ordinal>]]
+                  ref over SYS_RS, SYS_Tools, EXT_AIOS
+                    expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+                    ref_mode=call_return
+                  end ref
+                  SYS_RS --> SYS_AR : [step=S5.5r]\n[vals result.outcome=(ok|err)]
+
+                  SYS_AR -> SYS_AR : classify_batch_retry_patch_outcome(result)\n[step=S5.5c]\n[vals on_ok={status=BATCH_STATE_PERSISTED}; on_err={code=BATCH_RETRY_PATCH_FAILED}]
+
+                  alt [COND=classified.code=BATCH_RETRY_PATCH_FAILED]
+                    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.6]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.reason=BATCH_RETRY_PATCH_FAILED]
+                    ref over SYS_AR, SYS_Obs
+                      expand=S_SYS_OBSERVABILITY_EMIT
+                      ref_mode=call_return
+                    end ref
+                    SYS_Obs --> SYS_AR : [step=S5.6r]\n[vals result.outcome=ok]
+
+                    SYS_AR --> SYS_AR : [step=S5.7]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=BATCH_RETRY_PATCH_FAILED; result.err.task_id=<task_id>; result.err.batch_execution_unit_id=<batch_execution_unit_id>]
+                    break
+
+                  else [COND=classified.status=BATCH_STATE_PERSISTED]
+                    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.8]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_ATTEMPT_RETRY_SCHEDULED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.max_attempts=<max_attempts>]
+                    ref over SYS_AR, SYS_Obs
+                      expand=S_SYS_OBSERVABILITY_EMIT
+                      ref_mode=call_return
+                    end ref
+                    SYS_Obs --> SYS_AR : [step=S5.8r]\n[vals result.outcome=ok]
+                  end
+
+                else [COND=classified.attempt_outcome=BATCH_EXECUTION_TERMINAL_FAILURE]
+                  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S5.9]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref={kind="batch_execution_unit", id=<batch_execution_unit_id>}; patch.preconditions.batch_state=IN_PROGRESS; patch.ops=[set batch_state=FAILED, clear active_attempt_ref, set last_attempt_ordinal=<attempt_ordinal>, set failed_at=<now>]]
+                  ref over SYS_RS, SYS_Tools, EXT_AIOS
+                    expand=S_SYS_RUNTIME_STORE_APPLY_PATCH
+                    ref_mode=call_return
+                  end ref
+                  SYS_RS --> SYS_AR : [step=S5.9r]\n[vals result.outcome=(ok|err)]
+
+                  SYS_AR -> SYS_AR : classify_batch_terminal_failure_patch_outcome(result)\n[step=S5.9c]\n[vals on_ok={status=BATCH_STATE_PERSISTED}; on_err={code=BATCH_TERMINAL_FAILURE_PATCH_FAILED}]
+
+                  alt [COND=classified.code=BATCH_TERMINAL_FAILURE_PATCH_FAILED]
+                    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.10]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.reason=BATCH_TERMINAL_FAILURE_PATCH_FAILED]
+                    ref over SYS_AR, SYS_Obs
+                      expand=S_SYS_OBSERVABILITY_EMIT
+                      ref_mode=call_return
+                    end ref
+                    SYS_Obs --> SYS_AR : [step=S5.10r]\n[vals result.outcome=ok]
+
+                    SYS_AR --> SYS_AR : [step=S5.11]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.reason=BATCH_TERMINAL_FAILURE_PATCH_FAILED; result.err.task_id=<task_id>; result.err.batch_execution_unit_id=<batch_execution_unit_id>]
+                    break
+
+                  else [COND=classified.status=BATCH_STATE_PERSISTED]
+                    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.12]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=BATCH_EXECUTION_UNIT_FAILED; event.severity=WARN; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>; event.data.batch_execution_unit_id=<batch_execution_unit_id>; event.data.attempt_ordinal=<attempt_ordinal>; event.data.max_attempts=<max_attempts>]
+                    ref over SYS_AR, SYS_Obs
+                      expand=S_SYS_OBSERVABILITY_EMIT
+                      ref_mode=call_return
+                    end ref
+                    SYS_Obs --> SYS_AR : [step=S5.12r]\n[vals result.outcome=ok]
+
+                    SYS_AR --> SYS_AR : [step=S5.13]\n[vals result.outcome=ok; result.ok.status=BATCH_PHASE_TERMINAL_FAILURE; result.ok.reason=TERMINAL_UNIT_FAILURE_ENDS_BATCH_PHASE; result.ok.task_id=<task_id>; result.ok.batch_execution_unit_id=<batch_execution_unit_id>]
+                    break
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+@enduml

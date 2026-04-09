@@ -1,0 +1,7 @@
+Artifact,FinalizedView,Rows
+contracts.csv,finalized_contracts.csv,32
+types.csv,finalized_types.csv,59
+enums.csv,finalized_enums.csv,83
+rules.csv,finalized_rules.csv,109
+fields.csv,finalized_fields.csv,210
+errors_statuses.csv,finalized_errors_statuses.csv,75

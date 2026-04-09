@@ -1,0 +1,77 @@
+@startuml
+title Append text content through ToolsAdapter filesystem capability
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(System Component)" as SYS_CALLER
+
+box "AIOS — System Components" #F3F3F3
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "Target File Store\n(.aios / workspace / mounted storage)" as EXT_FS <<external>>
+end box
+
+note over SYS_CALLER, EXT_FS #FFF8DC
+S_SYS_TOOL_BUS_FS_APPEND_TEXT
+end note
+
+note over SYS_Tools, EXT_FS
+  ToolsAdapter owns external text-append boundary semantics.
+  Caller owns path selection and payload meaning.
+  ToolsAdapter owns boundary validation, execution, and normalization of result.
+  Append may be realized via dependency-native append or internal read+write composition.
+  This leaf covers only the filesystem capability family of ToolBus.
+end note
+
+group S1 "Caller requests text append through ToolsAdapter"
+  SYS_CALLER -> SYS_Tools : IF_SYS_TOOL_BUS.fs.append_text(ctx:CallContext, path:str, text:str, opts?:FSAppendOptions) -> Result[WriteResult]\n[step=S1.1]\n[connection use_port=<caller_use_tool_bus>; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=<caller__tools__tool_bus>]\n[vals path=path; opts.create_dirs=<bool_or_default>]
+  activate SYS_Tools
+end
+
+group S2 "ToolsAdapter validates request"
+  alt [COND=result.outcome=err and result.err.code=FS_PATH_INVALID]
+    SYS_Tools --> SYS_CALLER : [step=S2.1]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=FS_PATH_INVALID]
+    deactivate SYS_Tools
+
+  else [COND=result.outcome=err and result.err.code=FS_ACCESS_DENIED]
+    SYS_Tools --> SYS_CALLER : [step=S2.2]\n[vals result.outcome=err; result.err.category=SECURITY; result.err.code=FS_ACCESS_DENIED]
+    deactivate SYS_Tools
+
+  else [COND=result.outcome=ok]
+    note over SYS_Tools
+      ToolsAdapter may internally normalize:
+      - absolute/resolved path
+      - append-size policy
+      - parent directory creation behavior
+      - safe external invocation parameters
+    end note
+  end
+end
+
+group S3 "ToolsAdapter appends text through filesystem capability"
+  SYS_Tools -> EXT_FS : append text through configured file-store capability\n[step=S3.1]\n[vals path=path; text="<append_payload>"; create_dirs=opts.create_dirs]
+  EXT_FS --> SYS_Tools : [step=S3.1r]\n[vals result.outcome=(ok|err); result.ok.new_etag="<etag?>"; result.ok.content_type="<ct?>"]
+
+  alt [COND=result.outcome=err and result.err.code=FS_APPEND_FAILED]
+    SYS_Tools --> SYS_CALLER : [step=S3.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=FS_APPEND_FAILED]
+    deactivate SYS_Tools
+
+  else [COND=result.outcome=ok]
+  end
+end
+
+group S4 "ToolsAdapter returns normalized append result"
+  SYS_Tools --> SYS_CALLER : [step=S4.1]\n[vals result.outcome=ok; result.ok.new_etag="<etag?>"; result.ok.content_type="<ct?>"]
+  deactivate SYS_Tools
+end
+
+@enduml

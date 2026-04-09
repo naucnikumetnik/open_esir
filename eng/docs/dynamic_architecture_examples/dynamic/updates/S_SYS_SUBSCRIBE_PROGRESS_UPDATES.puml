@@ -1,0 +1,116 @@
+@startuml
+title Subscribe UI session to live progress updates for a run
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  control  "AgentRuntime" as SYS_AR <<component>>
+  control  "RuntimeStore" as SYS_RS <<component>>
+  control  "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over Human, EXT_AIOS #FFF8DC
+S_SYS_SUBSCRIBE_PROGRESS_UPDATES
+end note
+
+note over SYS_UI, SYS_RS
+  This scenario registers a live progress subscription for one run.
+  MVP supports run-scoped subscriptions only.
+  Subscription/session state is runtime-ephemeral and is not persisted in .aios.
+  UI should still use S_SYS_GET_PROGRESS for initial sync, reconnect, and recovery.
+end note
+
+group S1 "Human opens progress view and UI requests live updates"
+  Human -> SYS_UI : open_progress_view(run_ref:str)\n[step=S1.1]
+  activate SYS_UI
+
+  SYS_UI -> SYS_CG : IF_SYS_CLIENT_GATEWAY_PROGRESS.subscribe_progress_updates(ctx:CallContext, run_ref:str, subscriber_ref:str, last_seen_cursor?:ProgressCursor) -> Result[SubscribeProgressUpdatesResult]\n[step=S1.2]\n[connection use_port=P_UI_USE_CLIENT_GATEWAY_PROGRESS; prov_port=P_CG_PROV_CLIENT_GATEWAY_PROGRESS; conn=C_UI__CG__CLIENT_GATEWAY_PROGRESS]\n[vals run_ref=run_ref; subscriber_ref=<ui_session_ref>; last_seen_cursor=last_seen_cursor]
+  activate SYS_CG
+end
+
+group S2 "ClientGateway asks AgentRuntime to validate subscription target"
+  SYS_CG -> SYS_AR : IF_SYS_AGENT_RUNTIME.validate_progress_subscription(ctx:CallContext, run_ref:str) -> Result[ProgressSubscriptionTarget]\n[step=S2.1]\n[connection use_port=P_CG_USE_AGENT_RUNTIME; prov_port=P_AR_PROV_AGENT_RUNTIME; conn=C_CG__AR__AGENT_RUNTIME]\n[vals run_ref=run_ref]
+  activate SYS_AR
+
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_progress_subscription_target(ctx:CallContext, scope_kind:ObservableScopeKind, scope_ref:str) -> Result[ProgressSubscriptionTarget]\n[step=S2.2]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals scope_kind=run; scope_ref=run_ref]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_GET_PROGRESS_SUBSCRIPTION_TARGET
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S2.2r]\n[vals result.outcome=(ok|err); result.err.code=(SCOPE_KIND_UNSUPPORTED|SUBSCRIPTION_TARGET_NOT_FOUND|SUBSCRIPTION_TARGET_INVALID|SUBSCRIPTION_NOT_ALLOWED)]
+
+  alt [COND=result.outcome=err and result.err.code in (SCOPE_KIND_UNSUPPORTED|SUBSCRIPTION_TARGET_NOT_FOUND|SUBSCRIPTION_TARGET_INVALID)]
+    SYS_AR --> SYS_CG : [step=S2.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=SUBSCRIPTION_TARGET_NOT_FOUND]
+    SYS_CG --> SYS_UI : [step=S2.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=SUBSCRIPTION_TARGET_NOT_FOUND]
+    SYS_UI --> Human : show_error("Progress target not found")\n[step=S2.5]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=result.outcome=err and result.err.code=SUBSCRIPTION_NOT_ALLOWED]
+    note over SYS_AR
+      Subscription target may exist but still be non-subscribable.
+      Examples:
+      - scope is terminal and no longer publishable
+      - target policy forbids live subscription
+      - observable lifecycle/state does not support live updates
+    end note
+
+    SYS_AR --> SYS_CG : [step=S2.6]\n[vals result.outcome=err; result.err.category=AUTHORIZATION; result.err.code=SUBSCRIPTION_NOT_ALLOWED]
+    SYS_CG --> SYS_UI : [step=S2.7]\n[vals result.outcome=err; result.err.category=AUTHORIZATION; result.err.code=SUBSCRIPTION_NOT_ALLOWED]
+    SYS_UI --> Human : show_error("Subscription not allowed")\n[step=S2.8]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=result.outcome=ok]
+    SYS_AR --> SYS_CG : [step=S2.9]\n[vals result.outcome=ok; result.ok.run_ref=run_ref]
+    deactivate SYS_AR
+  end
+end
+
+group S3 "ClientGateway registers active subscriber session"
+  alt [COND=gateway.has_active_subscription(subscriber_ref, run_ref)=true]
+    SYS_CG -> SYS_CG : replace_or_refresh_progress_subscription(subscriber_ref, run_ref, last_seen_cursor?)\n[step=S3.1]\n[vals update={subscription_ref=<existing_or_reused_ref>; delivery_mode=best_effort_live; status=ACTIVE}]
+    note over SYS_CG
+      Duplicate subscribe is idempotent in this slice.
+      ClientGateway checks its own ephemeral session state for existing
+      subscriptions — RuntimeStore does not track subscription lifecycle.
+    end note
+
+  else [COND=gateway.has_active_subscription=false]
+    SYS_CG -> SYS_CG : register_progress_subscription(subscriber_ref, run_ref, last_seen_cursor?)\n[step=S3.2]\n[vals create={subscription_ref=<subscription_ref>; delivery_mode=best_effort_live; status=ACTIVE}]
+  end
+
+  note over SYS_CG
+    Active subscriptions are held in gateway/session runtime state.
+    They enable later live delivery in S_SYS_PUBLISH_PROGRESS_UPDATE.
+  end note
+end
+
+group S4 "Subscription acknowledgement is returned to UI"
+  SYS_CG --> SYS_UI : [step=S4.1]\n[vals result.outcome=ok; result.ok.subscription_ref=<subscription_ref>; result.ok.run_ref=run_ref; result.ok.delivery_mode=best_effort_live; result.ok.recovery_via=S_SYS_GET_PROGRESS]\n[bind subscription_ref=result.ok.subscription_ref]
+  SYS_UI --> Human : enable_live_progress(subscription_ref=<subscription_ref>, run_ref=<run_ref>)\n[step=S4.2]
+
+  deactivate SYS_CG
+  deactivate SYS_UI
+end
+
+@enduml

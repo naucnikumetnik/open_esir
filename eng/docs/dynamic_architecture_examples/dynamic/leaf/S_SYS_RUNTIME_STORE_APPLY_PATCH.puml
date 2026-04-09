@@ -1,0 +1,187 @@
+@startuml
+title Apply conditional patch to runtime-managed artifact in AIOS managed storage
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_RUNTIME_STORE_APPLY_PATCH
+end note
+
+note over SYS_RS, SYS_Tools
+  RuntimeStore owns conditional patch semantics for mutable
+  runtime-managed artifacts.
+  ToolsAdapter provides the physical access path to AIOS managed storage.
+  Core validates both current and patched artifact shape.
+end note
+
+note over SYS_RS
+  This slice applies an in-place patch only when:
+  - target ref is patchable
+  - target artifact exists and is valid
+  - patch envelope is valid
+  - patch preconditions hold on current artifact state
+
+  MVP intent:
+  - use for lifecycle/state mutation of existing records
+  - do not use for activation/materialization, immutable append,
+    or first-write persistence flows
+end note
+
+group S1 "AgentRuntime requests conditional patch"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.apply_patch(ctx:CallContext, ref:ArtifactRef, patch:PatchEnvelope) -> Result[PatchAck]\n[step=S1.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals ref.kind=ref.kind; ref.id=ref.id; patch.preconditions=<predicate_set>; patch.ops=<patch_ops>; patch.expected_etag=<optional>]
+  activate SYS_RS
+end
+
+group S2 "RuntimeStore validates patch request and resolves target path"
+  SYS_RS -> SYS_RS : validate_patch_request(ref, patch)\n[step=S2.1]\n[vals validate={ref_shape, patch_shape, target_kind_supported}]
+  alt [COND=validate.code=PATCH_REF_INVALID]
+    SYS_RS --> SYS_AR : [step=S2.2]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PATCH_REF_INVALID]
+    deactivate SYS_RS
+    stop
+
+  else [COND=validate.code=PATCH_INVALID]
+    SYS_RS --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PATCH_INVALID]
+    deactivate SYS_RS
+    stop
+
+  else [COND=validate.code=PATCH_TARGET_UNSUPPORTED]
+    SYS_RS --> SYS_AR : [step=S2.4]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PATCH_TARGET_UNSUPPORTED]
+    deactivate SYS_RS
+    stop
+
+  else [COND=PATCH_REQUEST_VALID]
+    SYS_RS -> SYS_RS : resolve_patch_target_path(ref)\n[step=S2.5]\n[vals resolved_patch_target_path=<runtime_managed_json_path>; target_artifact_kind=<artifact_kind>]
+    note over SYS_RS
+      Example mappings may include:
+      - ref.kind=run        -> .aios/runtime/runs/<ref.id>/run_meta.json
+      - ref.kind=draft_plan -> .aios/runtime/plans/<ref.id>/draft_plan.json
+      - ref.kind=task       -> .aios/runtime/runs/<run_ref>/task_runtime_index.json
+      Exact mapping remains RuntimeStore-owned.
+    end note
+  end
+end
+
+group S3 "RuntimeStore loads current target artifact through ToolsAdapter"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S3.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=<resolved_patch_target_path>; opts.encoding="utf-8"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S3.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_patch_target_read_error(result.err)\n[step=S3.2]\n[vals mapped_code=(PATCH_TARGET_NOT_FOUND|PATCH_TARGET_READ_FAILED)]
+    alt [COND=mapped_code=PATCH_TARGET_NOT_FOUND]
+      SYS_RS --> SYS_AR : [step=S3.3]\n[vals result.outcome=err; result.err.category=NOT_FOUND; result.err.code=PATCH_TARGET_NOT_FOUND]
+      deactivate SYS_RS
+      stop
+    else [COND=mapped_code=PATCH_TARGET_READ_FAILED]
+      SYS_RS --> SYS_AR : [step=S3.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PATCH_TARGET_READ_FAILED]
+      deactivate SYS_RS
+      stop
+    end
+  end
+end
+
+group S4 "RuntimeStore validates and parses current target artifact"
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S4.1]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="patch_target_current"; kind=ARTIFACT; content_type="application/json"; payload_text="<current_target_json>"}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate current target artifact before parse."
+  end ref
+  SYS_Core --> SYS_RS : [step=S4.1r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S4.2]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PATCH_TARGET_INVALID]
+    deactivate SYS_RS
+    stop
+  else [COND=CURRENT_TARGET_VALID]
+    SYS_RS -> SYS_RS : current_target=parse_patch_target("<current_target_json>", target_artifact_kind)\n[step=S4.3]\n[vals current_target=<typed_runtime_artifact>; current_etag=<optional_current_etag>]
+  end
+end
+
+group S5 "RuntimeStore evaluates preconditions and derives patched artifact"
+  SYS_RS -> SYS_RS : evaluate_patch_preconditions(current_target, patch.preconditions)\n[step=S5.1]\n[vals precondition_result=(PASS|FAIL)]
+  alt [COND=precondition_result=FAIL]
+    SYS_RS --> SYS_AR : [step=S5.2]\n[vals result.outcome=err; result.err.category=CONFLICT; result.err.code=PATCH_PRECONDITION_FAILED]
+    deactivate SYS_RS
+    stop
+  else [COND=PRECONDITIONS_PASS]
+    SYS_RS -> SYS_RS : apply_patch_ops(current_target, patch.ops)\n[step=S5.3]\n[vals patched_target=<typed_runtime_artifact_or_err>]
+    alt [COND=apply_patch_ops failed]
+      SYS_RS --> SYS_AR : [step=S5.4]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PATCH_OP_INVALID]
+      deactivate SYS_RS
+      stop
+    else [COND=PATCH_DERIVED]
+      SYS_RS -> SYS_RS : finalize_patched_target_metadata(patched_target)\n[step=S5.5]\n[vals mutate={modified_at=<now>; version=<optional_increment>}]
+    end
+  end
+end
+
+group S6 "RuntimeStore validates and serializes patched target artifact"
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S6.1]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="patch_target_patched"; kind=ARTIFACT; content_type="application/json"; payload_any=patched_target}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate patched target artifact before persistence."
+  end ref
+  SYS_Core --> SYS_RS : [step=S6.1r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S6.2]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=PATCH_OP_INVALID]
+    deactivate SYS_RS
+    stop
+  else [COND=PATCHED_TARGET_VALID]
+    SYS_RS -> SYS_RS : serialize_patch_target(patched_target)\n[step=S6.3]\n[vals patched_target_json="<patched_target_json>"]
+  end
+end
+
+group S7 "RuntimeStore persists patched artifact through ToolsAdapter"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S7.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=<resolved_patch_target_path>; text="<patched_target_json>"; expected_etag="<patch.expected_etag_or_current_etag_or_null>"; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S7.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_patch_write_error(result.err)\n[step=S7.2]\n[vals mapped_code=(PATCH_PERSIST_FAILED|PATCH_PRECONDITION_FAILED)]
+    alt [COND=mapped_code=PATCH_PRECONDITION_FAILED]
+      SYS_RS --> SYS_AR : [step=S7.3]\n[vals result.outcome=err; result.err.category=CONFLICT; result.err.code=PATCH_PRECONDITION_FAILED]
+      deactivate SYS_RS
+      stop
+    else [COND=mapped_code=PATCH_PERSIST_FAILED]
+      SYS_RS --> SYS_AR : [step=S7.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PATCH_PERSIST_FAILED]
+      deactivate SYS_RS
+      stop
+    end
+  end
+end
+
+group S8 "RuntimeStore returns patch acknowledgement"
+  SYS_RS -> SYS_RS : derive_new_etag(patched_target_json)\n[step=S8.1]\n[vals new_etag="<patched_etag>"]
+  SYS_RS --> SYS_AR : [step=S8.2]\n[vals result.outcome=ok; result.ok.ref=ref; result.ok.applied=true; result.ok.new_etag="<patched_etag>"]
+  deactivate SYS_RS
+end
+
+@enduml

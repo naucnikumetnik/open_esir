@@ -1,0 +1,229 @@
+@startuml
+title Confirm or reject draft execution plan
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  control  "AgentRuntime" as SYS_AR <<component>>
+  control  "RuntimeStore" as SYS_RS <<component>>
+  control  "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  control  "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over Human, EXT_AIOS #FFF8DC
+S_SYS_CONFIRM_OR_REJECT_EXECUTION_PLAN
+end note
+
+note over SYS_AR
+  This scenario applies only to draft plans in READY_FOR_CONFIRMATION state.
+  Human decision is required to leave draft-plan world.
+end note
+
+note over SYS_AR
+  Confirming a draft plan creates run_ref, transitions from
+  draft-plan world to run world, and automatically starts run execution.
+  Rejecting a draft plan does not create a run.
+end note
+
+group S1 "Human reviews draft plan and submits decision"
+  Human -> SYS_UI : decide_execution_plan(plan_ref:str, decision:PlanDecision)\n[step=S1.1]\n[vals decision in {confirm,reject}]
+  activate SYS_UI
+
+  SYS_UI -> SYS_CG : IF_SYS_CLIENT_GATEWAY_EXECUTION.confirm_or_reject_execution_plan(ctx:CallContext, plan_ref:str, decision:PlanDecision) -> Result[ExecutionPlanDecisionResult]\n[step=S1.2]\n[connection use_port=P_UI_USE_CLIENT_GATEWAY_EXECUTION; prov_port=P_CG_PROV_CLIENT_GATEWAY_EXECUTION; conn=C_UI__CG__CLIENT_GATEWAY_EXECUTION]\n[vals plan_ref=plan_ref; decision=decision]
+  activate SYS_CG
+
+  SYS_CG -> SYS_AR : IF_SYS_AGENT_RUNTIME.confirm_or_reject_execution_plan(ctx:CallContext, plan_ref:str, decision:PlanDecision) -> Result[ExecutionPlanDecisionResult]\n[step=S1.3]\n[connection use_port=P_CG_USE_AGENT_RUNTIME; prov_port=P_AR_PROV_AGENT_RUNTIME; conn=C_CG__AR__AGENT_RUNTIME]\n[vals plan_ref=plan_ref; decision=decision]
+  activate SYS_AR
+end
+
+group S2 "AgentRuntime loads draft plan and checks confirmability"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_DECISION_STARTED; event.severity=INFO; event.visibility=internal; event.data.plan_ref=plan_ref]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S2.1r]\n[vals result.outcome=ok]
+
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_draft_execution_plan(ctx:CallContext, plan_ref:str) -> Result[DraftExecutionPlan]\n[step=S2.2]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals plan_ref=plan_ref]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_GET_DRAFT_EXECUTION_PLAN
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S2.2r]\n[vals result.outcome=(ok|err); result.err.code=(DRAFT_PLAN_UNAVAILABLE|DRAFT_PLAN_INVALID); result.ok.plan_ref=plan_ref; result.ok.plan_state=<draft_plan_state>; result.ok.parent_task_ids=<parent_task_ids>; result.ok.tasks=<task_graph>]
+
+  SYS_AR -> SYS_AR : check_plan_confirmability(result.ok.plan_state)\n[step=S2.2c]\n[vals rules={plan_state=READY_FOR_CONFIRMATION\u2192PLAN_CONFIRMABLE; otherwise\u2192NO_ACTION}]
+
+  alt [COND=result.outcome=err and result.err.code=DRAFT_PLAN_UNAVAILABLE]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.3]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_DECISION_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=DRAFT_PLAN_UNAVAILABLE; event.data.plan_ref=plan_ref]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.3r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S2.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=DRAFT_PLAN_UNAVAILABLE]
+    SYS_CG --> SYS_UI : [step=S2.5]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=DRAFT_PLAN_UNAVAILABLE]
+    SYS_UI --> Human : show_error("Draft execution plan unavailable")\n[step=S2.6]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=result.outcome=err and result.err.code=DRAFT_PLAN_INVALID]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.3b]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_DECISION_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=DRAFT_PLAN_INVALID; event.data.plan_ref=plan_ref]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.3br]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S2.4b]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=DRAFT_PLAN_INVALID]
+    SYS_CG --> SYS_UI : [step=S2.5b]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=DRAFT_PLAN_INVALID]
+    SYS_UI --> Human : show_error("Draft execution plan is invalid")\n[step=S2.6b]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=classified.confirmability=NO_ACTION]
+    note over SYS_AR
+      Examples:
+      - plan already activated
+      - plan already rejected
+      - plan became stale
+    end note
+
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.7]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_DECISION_IGNORED; event.severity=WARN; event.visibility=internal; event.data.plan_ref=plan_ref]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.7r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S2.8]\n[vals result.outcome=ok; result.ok.status=NO_ACTION; result.ok.reason=PLAN_NOT_CONFIRMABLE; result.ok.plan_ref=plan_ref]
+    SYS_CG --> SYS_UI : [step=S2.9]\n[vals result.outcome=ok; result.ok.status=NO_ACTION; result.ok.reason=PLAN_NOT_CONFIRMABLE; result.ok.plan_ref=plan_ref]
+    SYS_UI --> Human : update_view_state(status="no_action", reason="PLAN_NOT_CONFIRMABLE")\n[step=S2.10]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=classified.confirmability=PLAN_CONFIRMABLE]
+    group S3 "AgentRuntime applies human decision"
+      alt [COND=decision=reject]
+        SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.reject_draft_execution_plan(ctx:CallContext, plan_ref:str, reason:str) -> Result[RejectedExecutionPlan]\n[step=S3.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals plan_ref=plan_ref; reason=REJECTED_BY_USER]
+
+        ref over SYS_RS, SYS_Tools, EXT_AIOS
+          expand=S_SYS_RUNTIME_STORE_REJECT_DRAFT_EXECUTION_PLAN
+          ref_mode=call_return
+        end ref
+
+        SYS_RS --> SYS_AR : [step=S3.1r]\n[vals result.outcome=(ok|err); result.ok.plan_ref=plan_ref; result.ok.plan_state=REJECTED_BY_USER; result.ok.reason=REJECTED_BY_USER]
+
+        alt [COND=result.outcome=err and result.err.code=DRAFT_PLAN_REJECT_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_DECISION_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=DRAFT_PLAN_REJECT_FAILED; event.data.plan_ref=plan_ref]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.2r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_CG : [step=S3.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=DRAFT_PLAN_REJECT_FAILED]
+          SYS_CG --> SYS_UI : [step=S3.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=DRAFT_PLAN_REJECT_FAILED]
+          SYS_UI --> Human : show_error("Plan rejection could not be stored")\n[step=S3.5]
+          deactivate SYS_AR
+          deactivate SYS_CG
+          deactivate SYS_UI
+
+        else [COND=result.outcome=ok and result.ok.plan_state=REJECTED_BY_USER]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.6]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_REJECTED; event.severity=INFO; event.visibility=internal; event.data.plan_ref=plan_ref]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.6r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_CG : [step=S3.7]\n[vals result.outcome=ok; result.ok.status=REJECTED; result.ok.reason=REJECTED_BY_USER; result.ok.plan_ref=plan_ref; result.ok.plan_state=REJECTED_BY_USER]
+          SYS_CG --> SYS_UI : [step=S3.8]\n[vals result.outcome=ok; result.ok.status=REJECTED; result.ok.reason=REJECTED_BY_USER; result.ok.plan_ref=plan_ref; result.ok.plan_state=REJECTED_BY_USER]
+          SYS_UI --> Human : update_view_state(plan_ref=plan_ref, plan_state="REJECTED_BY_USER")\n[step=S3.9]
+          deactivate SYS_AR
+          deactivate SYS_CG
+          deactivate SYS_UI
+        end
+
+      else [COND=decision=confirm]
+        SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.activate_draft_execution_plan(ctx:CallContext, plan_ref:str) -> Result[ActivatedExecutionPlan]\n[step=S3.10]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals plan_ref=plan_ref]
+
+        ref over SYS_RS, SYS_Tools, EXT_AIOS
+          expand=S_SYS_RUNTIME_STORE_ACTIVATE_DRAFT_EXECUTION_PLAN
+          ref_mode=call_return
+        end ref
+
+        SYS_RS --> SYS_AR : [step=S3.10r]\n[vals result.outcome=(ok|err); result.ok.plan_ref=plan_ref; result.ok.plan_state=READY_FOR_EXECUTION; result.ok.run_ref=<run_ref>; result.ok.execution_plan_path=".aios/runtime/runs/<run_ref>/execution_plan.json"]\n[bind run_ref=result.ok.run_ref]
+
+        alt [COND=result.outcome=err and result.err.code=PLAN_ACTIVATION_FAILED]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.11]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_DECISION_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=PLAN_ACTIVATION_FAILED; event.data.plan_ref=plan_ref]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.11r]\n[vals result.outcome=ok]
+
+          SYS_AR --> SYS_CG : [step=S3.12]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PLAN_ACTIVATION_FAILED]
+          SYS_CG --> SYS_UI : [step=S3.13]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PLAN_ACTIVATION_FAILED]
+          SYS_UI --> Human : show_error("Execution plan activation failed")\n[step=S3.14]
+          deactivate SYS_AR
+          deactivate SYS_CG
+          deactivate SYS_UI
+
+        else [COND=result.outcome=ok and result.ok.plan_state=READY_FOR_EXECUTION]
+          SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.15]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_CONFIRMED; event.severity=INFO; event.visibility=internal; event.data.plan_ref=plan_ref; event.data.run_ref=<run_ref>]
+          ref over SYS_AR, SYS_Obs
+            expand=S_SYS_OBSERVABILITY_EMIT
+            ref_mode=call_return
+          end ref
+          SYS_Obs --> SYS_AR : [step=S3.15r]\n[vals result.outcome=ok]
+
+          ref over SYS_AR, SYS_RS, SYS_Obs
+            expand=S_SYS_START_RUN_EXECUTION
+            ref_mode=call_return
+          end ref
+
+          alt [COND=result.outcome=err and result.err.code=RUN_START_FAILED]
+            SYS_AR --> SYS_CG : [step=S3.16]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=RUN_START_FAILED]
+            SYS_CG --> SYS_UI : [step=S3.17]\n[vals result.outcome=err; result.err.category=(CONFLICT|DEPENDENCY); result.err.code=RUN_START_FAILED]
+            SYS_UI --> Human : show_error("Execution plan confirmed but run start failed")\n[step=S3.18]
+            deactivate SYS_AR
+            deactivate SYS_CG
+            deactivate SYS_UI
+
+          else [COND=result.outcome=ok and result.ok.status=RUN_ADMITTED]
+            SYS_AR --> SYS_CG : [step=S3.19]\n[vals result.outcome=ok; result.ok.status=RUN_ADMITTED; result.ok.reason=PLAN_CONFIRMED; result.ok.plan_ref=plan_ref; result.ok.plan_state=READY_FOR_EXECUTION; result.ok.run_ref=<run_ref>; result.ok.run_state=RUNNING; result.ok.execution_plan_path=".aios/runtime/runs/<run_ref>/execution_plan.json"]
+            SYS_CG --> SYS_UI : [step=S3.20]\n[vals result.outcome=ok; result.ok.status=RUN_ADMITTED; result.ok.reason=PLAN_CONFIRMED; result.ok.plan_ref=plan_ref; result.ok.plan_state=READY_FOR_EXECUTION; result.ok.run_ref=<run_ref>; result.ok.run_state=RUNNING; result.ok.execution_plan_path=".aios/runtime/runs/<run_ref>/execution_plan.json"]
+            SYS_UI --> Human : store_refs_and_transition_view(plan_ref=plan_ref, run_ref=<run_ref>, run_state="RUNNING")\n[step=S3.21]
+
+            deactivate SYS_AR
+            deactivate SYS_CG
+            deactivate SYS_UI
+          end
+        end
+      end
+    end
+  end
+end
+
+@enduml

@@ -1,0 +1,46 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net6.0;net8.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TaxCore.Libraries.$(MSBuildProjectName)</AssemblyName>
+    <RootNamespace>TaxCore.Libraries.$(MSBuildProjectName.Replace(" ", "_"))</RootNamespace>
+    <PackageProjectUrl>https://github.com/Data-Tech-International/TaxCore-Libraries</PackageProjectUrl>
+    <PackageIcon>taxcore.png</PackageIcon>
+    <RepositoryUrl>https://github.com/Data-Tech-International/TaxCore-Libraries</RepositoryUrl>
+    <PackageLicenseUrl>https://github.com/Data-Tech-International/TaxCore-Libraries/blob/main/LICENSE</PackageLicenseUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>Libraries for work with certificates created by the TaxCore solution</Description>
+	</PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Icon\taxcore.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Icon\taxcore.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BouncyCastle.NetCore" Version="1.9.0" />
+    <PackageReference Include="System.ComponentModel.Annotations" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Icon\taxcore.png" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,107 @@
+@startuml
+title Select next runnable task from active run
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentRuntime" as SYS_AR <<component>>
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  control "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_SELECT_NEXT_TASK
+[semantics scope={task_selection_only}; selection_policy={deterministic,dependency_satisfied_only,stable_execution_plan_order,no_parallelism}; state_mutation=none; observability_effect=best_effort]
+end note
+
+note over SYS_AR
+  Selects the next runnable parent task for an admitted run.
+  MVP selection is deterministic:
+  - no parallelism
+  - dependency-satisfied tasks only
+  - terminal and blocked tasks excluded
+  - stable ordering from persisted execution plan
+end note
+
+group S1 "AgentRuntime begins task-selection cycle"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S1.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=NEXT_TASK_SELECTION_STARTED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok]
+end
+
+group S2 "AgentRuntime loads run selection context"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_run_selection_context(ctx:CallContext, run_ref:str) -> Result[RunSelectionContext]\n[step=S2.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=<run_ref>]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_GET_RUN_SELECTION_CONTEXT
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=RUN_SELECTION_CONTEXT_UNAVAILABLE; result.ok.status=(NO_SELECTION|RUN_SELECTION_CONTEXT_READY); result.ok.reason=RUN_NOT_ACTIVE; result.ok.run_state=<run_state>]
+
+  alt [COND=result.outcome=err and result.err.code=RUN_SELECTION_CONTEXT_UNAVAILABLE]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=NEXT_TASK_SELECTION_FAILED; event.severity=ERROR; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.reason=RUN_SELECTION_CONTEXT_UNAVAILABLE]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.2r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION); result.err.code=NEXT_TASK_SELECTION_FAILED; result.err.reason=RUN_SELECTION_CONTEXT_UNAVAILABLE]
+
+  else [COND=result.outcome=ok and result.ok.status=NO_SELECTION and result.ok.reason=RUN_NOT_ACTIVE]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=NEXT_TASK_SELECTION_REJECTED; event.severity=WARN; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.reason=RUN_NOT_ACTIVE; event.data.run_state=<run_state>]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.4r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_AR : [step=S2.5]\n[vals result.outcome=ok; result.ok.status=NO_SELECTION; result.ok.reason=RUN_NOT_ACTIVE; result.ok.run_state=<run_state>]
+
+  else [COND=result.outcome=ok and result.ok.status=RUN_SELECTION_CONTEXT_READY]
+    SYS_AR --> SYS_AR : [step=S2.6]\n[bind selection_ctx=result.ok]
+
+    group S3 "AgentRuntime derives next runnable task deterministically"
+      SYS_AR -> SYS_AR : derive_next_runnable_task(selection_ctx)\n[step=S3.1]\n[vals rules={dependencies_satisfied,non_terminal,non_blocked,stable_plan_order,review_tasks_follow_dependency_edges=true}; on_selected={status=TASK_SELECTED,task_id=<task_id>}; on_none={status=NO_SELECTION,reason=NO_RUNNABLE_TASKS}]
+
+      alt [COND=derived.status=NO_SELECTION and derived.reason=NO_RUNNABLE_TASKS]
+        SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=NO_RUNNABLE_TASKS; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>]
+        ref over SYS_AR, SYS_Obs
+          expand=S_SYS_OBSERVABILITY_EMIT
+          ref_mode=call_return
+        end ref
+        SYS_Obs --> SYS_AR : [step=S3.2r]\n[vals result.outcome=ok]
+
+        SYS_AR --> SYS_AR : [step=S3.3]\n[vals result.outcome=ok; result.ok.status=NO_SELECTION; result.ok.reason=NO_RUNNABLE_TASKS]
+
+      else [COND=derived.status=TASK_SELECTED]
+        SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.4]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=NEXT_TASK_SELECTED; event.severity=INFO; event.visibility=internal; event.scope_kind=run; event.scope_ref=<run_ref>; event.data.task_id=<task_id>]
+        ref over SYS_AR, SYS_Obs
+          expand=S_SYS_OBSERVABILITY_EMIT
+          ref_mode=call_return
+        end ref
+        SYS_Obs --> SYS_AR : [step=S3.4r]\n[vals result.outcome=ok]
+
+        SYS_AR --> SYS_AR : [step=S3.5]\n[vals result.outcome=ok; result.ok.status=TASK_SELECTED; result.ok.task_id=<task_id>]
+      end
+    end
+  end
+end
+
+@enduml

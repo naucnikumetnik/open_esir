@@ -1,0 +1,43 @@
+@startuml
+title Validate execution inputs and prepare executable request
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime / ExecEngine)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "Core" as SYS_Core <<component>>
+end box
+
+note over SYS_AR, SYS_Core #FFF8DC
+S_SYS_CORE_VALIDATE_AND_PREPARE_EXECUTION
+end note
+
+note over SYS_Core
+  Core consumes batch-unit payload and already-fetched reference artifacts.
+  Validation, task parsing, prompt compilation, and executable-request assembly
+  remain collapsed in this black-box service leaf.
+  It performs no artifact reads and no generation dispatch in this operation.
+end note
+
+group S1 "AgentRuntime requests execution preparation"
+  SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.validate_and_prepare_execution(ctx:CallContext, batch_unit:any, refs:any, fw:FrameworkHandle) -> Result[PreparedExecutionRequest]\n[step=S1.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals batch_unit.id="<batch_execution_unit_id>"; refs.count="<n>"; fw=fw]
+  activate SYS_Core
+
+  alt [COND=EXECUTION_PREPARATION_FAILED]
+    SYS_Core --> SYS_AR : [step=S1.1err]\n[vals result.outcome=err; result.err.category=(VALIDATION|INTERNAL); result.err.code=EXECUTION_PREPARATION_FAILED]
+    deactivate SYS_Core
+  else [COND=INPUTS_VALID]
+    SYS_Core --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok; result.ok.status=EXECUTION_REQUEST_READY; result.ok.prompt_id="<prompt_id>"; result.ok.task_id="<task_id>"]
+    deactivate SYS_Core
+  end
+end
+
+@enduml

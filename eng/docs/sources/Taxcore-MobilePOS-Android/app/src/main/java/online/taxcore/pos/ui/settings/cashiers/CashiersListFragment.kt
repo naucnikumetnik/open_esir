@@ -1,0 +1,84 @@
+package online.taxcore.pos.ui.settings.cashiers
+
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuInflater
+import android.view.MenuItem
+import android.view.View
+import android.view.ViewGroup
+import androidx.appcompat.widget.SearchView
+import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.vicpin.krealmextensions.queryAll
+import online.taxcore.pos.R
+import online.taxcore.pos.data.realm.Cashier
+import online.taxcore.pos.databinding.CashiersListFragmentBinding
+import online.taxcore.pos.extensions.baseActivity
+import online.taxcore.pos.utils.hideKeyboard
+import online.taxcore.pos.utils.onQueryChange
+
+class CashiersListFragment : Fragment() {
+
+    private var _binding: CashiersListFragmentBinding? = null
+    private val binding get() = _binding!!
+
+    private var searchMenuItem: MenuItem? = null
+    private var cashiersAdapter: CashiersAdapter? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setHasOptionsMenu(true)
+    }
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+        _binding = CashiersListFragmentBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        initList()
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+
+    override fun onResume() {
+        super.onResume()
+        cashiersAdapter?.setData(Cashier().queryAll().toMutableList())
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
+        inflater.inflate(R.menu.search, menu)
+
+        searchMenuItem = menu.findItem(R.id.actionSearch)
+
+        val searchView = searchMenuItem?.actionView as SearchView
+        searchView.queryHint = getString(R.string.cashier_search)
+        searchView.onQueryChange { query ->
+            cashiersAdapter?.changeDataByFilter(query)
+        }
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            android.R.id.home -> {
+                activity?.hideKeyboard()
+                @Suppress("DEPRECATION")
+                activity?.onBackPressed()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun initList() {
+        cashiersAdapter = CashiersAdapter()
+
+        binding.cashiersRecyclerView.layoutManager = LinearLayoutManager(baseActivity())
+        binding.cashiersRecyclerView.adapter = cashiersAdapter
+
+    }
+}

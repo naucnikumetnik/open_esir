@@ -1,0 +1,68 @@
+@startuml
+title Initiate execution and automatically enter orchestration
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  control  "AgentRuntime" as SYS_AR <<component>>
+end box
+
+note over Human, SYS_AR #FFF8DC
+S_SYS_INITIATE_AND_APPROVE_EXECUTION
+[semantics lifecycle_spine=true]
+end note
+
+group S1 "Human initiates execution request"
+  ref over Human, SYS_UI, SYS_CG, SYS_AR
+    expand=S_SYS_PREPARE_EXECUTION_REQUEST
+    ref_mode=call_return
+  end ref
+end
+
+alt [COND=result.outcome=err]
+
+else [COND=result.outcome=ok and result.ok.status=READY_FOR_PLAN_BUILD]
+  group S2 "Prepared request is used to build draft execution plan"
+    ref over Human, SYS_UI, SYS_CG, SYS_AR
+      expand=S_SYS_BUILD_EXECUTION_PLAN
+      ref_mode=call_return
+    end ref
+  end
+
+  alt [COND=result.outcome=err]
+
+  else [COND=result.outcome=ok and result.ok.status=NEEDS_CHANGE]
+
+  else [COND=result.outcome=ok and result.ok.status=READY_FOR_CONFIRMATION]
+    group S3 "Human confirms or rejects draft execution plan"
+      ref over Human, SYS_UI, SYS_CG, SYS_AR
+        expand=S_SYS_CONFIRM_OR_REJECT_EXECUTION_PLAN
+        ref_mode=call_return
+      end ref
+    end
+
+    alt [COND=result.outcome=ok and result.ok.status=REJECTED]
+
+    else [COND=result.outcome=ok and result.ok.status=NO_ACTION]
+
+    else [COND=result.outcome=err and result.err.code=PLAN_ACTIVATION_FAILED]
+
+    else [COND=result.outcome=err and result.err.code=RUN_START_FAILED]
+
+    else [COND=result.outcome=ok and result.ok.status=RUN_ADMITTED]
+    end
+  end
+end
+
+@enduml

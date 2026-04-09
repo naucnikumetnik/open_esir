@@ -1,0 +1,144 @@
+@startuml
+title Own run-level orchestration loop for one admitted run
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentRuntime" as SYS_AR <<component>>
+  control "RuntimeStore" as SYS_RS <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_RUN_ORCHESTRATION_LOOP
+[ownership single_owner=true; scope={select_task,prepare_batches,execute_batches,close_task,close_run}; one_active_run_owner=true; child_expand_rule=no_sibling_expansion; failure_policy=stop_loop_on_child_error; observability_effect=best_effort]
+end note
+
+note over SYS_AR
+  Entry assumptions:
+  - run_ref is already admitted for execution
+  - run_state=RUNNING
+  - exactly one orchestration owner advances this run
+
+  Loop intent:
+  - select one runnable parent task
+  - prepare its child batch execution units
+  - execute prepared child batch units with bounded attempts
+  - close the selected parent task from persisted child outcomes
+  - close the run when no further runnable parent task exists
+end note
+
+loop [COND=run_state=RUNNING and orchestration_ended=false]
+
+  group S1 "AgentRuntime selects next runnable parent task"
+    ref over SYS_AR, SYS_RS
+      expand=S_SYS_SELECT_NEXT_TASK
+      ref_mode=call_return
+    end ref
+  end
+
+  alt [COND=result.outcome=err and result.err.code=NEXT_TASK_SELECTION_FAILED]
+    SYS_AR --> SYS_AR : [step=S1.1]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=NEXT_TASK_SELECTION_FAILED]
+    break
+
+  else [COND=result.outcome=ok and result.ok.status=NO_SELECTION]
+
+    group S2 "AgentRuntime closes run because no further runnable parent task exists"
+      ref over SYS_AR, SYS_RS
+        expand=S_SYS_CLOSE_RUN_EXECUTION
+        ref_mode=call_return
+      end ref
+    end
+
+    alt [COND=result.outcome=err and result.err.code=RUN_CLOSURE_FAILED]
+      SYS_AR --> SYS_AR : [step=S2.1]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=RUN_CLOSURE_FAILED]
+      break
+
+    else [COND=result.outcome=ok and result.ok.status=RUN_TERMINATED]
+      SYS_AR --> SYS_AR : [step=S2.2]\n[vals result.outcome=ok; result.ok.status=RUN_TERMINATED; result.ok.run_ref=<run_ref>; result.ok.run_state=(COMPLETED|FAILED|BLOCKED); orchestration_ended=true]
+      break
+    end
+
+  else [COND=result.outcome=ok and result.ok.status=TASK_SELECTED]
+    SYS_AR --> SYS_AR : [step=S1.2]\n[bind task_id=result.ok.task_id]
+
+    group S3 "AgentRuntime prepares batch execution units for selected parent task"
+      ref over SYS_AR, SYS_RS
+        expand=S_SYS_PREPARE_TASK_BATCHES
+        ref_mode=call_return
+      end ref
+    end
+
+    alt [COND=result.outcome=err and result.err.code=TASK_BATCH_PREPARE_FAILED]
+      SYS_AR --> SYS_AR : [step=S3.1]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=TASK_BATCH_PREPARE_FAILED; result.err.task_id=<task_id>]
+      break
+
+    else [COND=result.outcome=ok and result.ok.status=BATCH_PREPARATION_DONE]
+
+      group S4 "AgentRuntime executes prepared batch execution units"
+        ref over SYS_AR, SYS_RS
+          expand=S_SYS_EXECUTE_TASK_BATCH_WITH_ATTEMPTS
+          ref_mode=call_return
+        end ref
+      end
+
+      alt [COND=result.outcome=err and result.err.code=BATCH_EXECUTION_STEP_FAILED]
+        SYS_AR --> SYS_AR : [step=S4.1]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=BATCH_EXECUTION_STEP_FAILED; result.err.task_id=<task_id>]
+        break
+
+      else [COND=result.outcome=ok and result.ok.status in (BATCH_PHASE_COMPLETED,BATCH_PHASE_TERMINAL_FAILURE)]
+
+        group S5 "AgentRuntime closes selected parent task from persisted batch outcomes"
+          ref over SYS_AR, SYS_RS
+            expand=S_SYS_CLOSE_TASK_EXECUTION
+            ref_mode=call_return
+          end ref
+        end
+
+        alt [COND=result.outcome=err and result.err.code=TASK_CLOSURE_FAILED]
+          SYS_AR --> SYS_AR : [step=S5.1]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=TASK_CLOSURE_FAILED; result.err.task_id=<task_id>]
+          break
+
+        else [COND=result.outcome=ok and result.ok.status=TASK_TERMINATED]
+          SYS_AR --> SYS_AR : [step=S5.2]\n[vals result.outcome=ok; result.ok.status=TASK_TERMINATED; result.ok.task_id=<task_id>; result.ok.task_state=(COMPLETED|FAILED|BLOCKED); next_action=CONTINUE_RUN_LOOP]
+        end
+      end
+
+    else [COND=result.outcome=ok and result.ok.status=NO_BATCH_UNITS_READY]
+
+      note over SYS_AR
+        No dispatchable child batch work is available for the selected
+        parent task in this orchestration cycle.
+        Task-closure ownership still remains here so the selected task
+        is normalized to a terminal persisted state before reselection.
+      end note
+
+      group S6 "AgentRuntime closes selected parent task from persisted batch outcomes"
+        ref over SYS_AR, SYS_RS
+          expand=S_SYS_CLOSE_TASK_EXECUTION
+          ref_mode=call_return
+        end ref
+      end
+
+      alt [COND=result.outcome=err and result.err.code=TASK_CLOSURE_FAILED]
+        SYS_AR --> SYS_AR : [step=S6.1]\n[vals result.outcome=err; result.err.category=(NOT_FOUND|DEPENDENCY|VALIDATION|CONFLICT); result.err.code=TASK_CLOSURE_FAILED; result.err.task_id=<task_id>]
+        break
+
+      else [COND=result.outcome=ok and result.ok.status=TASK_TERMINATED]
+        SYS_AR --> SYS_AR : [step=S6.2]\n[vals result.outcome=ok; result.ok.status=TASK_TERMINATED; result.ok.task_id=<task_id>; result.ok.task_state=(COMPLETED|FAILED|BLOCKED); next_action=CONTINUE_RUN_LOOP]
+      end
+    end
+  end
+end
+
+@enduml

@@ -1,0 +1,134 @@
+@startuml
+title Get run progress snapshot from AIOS managed storage
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_RUNTIME_STORE_GET_PROGRESS_SNAPSHOT
+end note
+
+note over SYS_RS, SYS_Tools
+  RuntimeStore owns durable progress-read semantics.
+  ToolsAdapter provides the physical access path to AIOS managed storage.
+  Core validates persisted artifacts before RuntimeStore parses and derives the snapshot.
+end note
+
+note over SYS_RS
+  This read path is run-scoped.
+  Progress snapshot is reconstructed from durable run metadata
+  plus persisted run activity history.
+end note
+
+group S1 "AgentRuntime requests run progress snapshot"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_progress_snapshot(ctx:CallContext, run_ref:str, cursor?:ProgressCursor) -> Result[ProgressSnapshot]\n[step=S1.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=run_ref; cursor=cursor]
+  activate SYS_RS
+
+  alt [COND=run_ref is null or malformed]
+    SYS_RS --> SYS_AR : [step=S1.2]\n[vals result.outcome=err; result.err.category=INPUT; result.err.code=RUN_REF_INVALID]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S2 "RuntimeStore loads, validates, and parses run metadata"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S2.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/run_meta.json"; opts.encoding="utf-8"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_run_meta_read_error(result.err)\n[step=S2.2]\n[vals mapped_code=RUN_NOT_FOUND]
+    SYS_RS --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=NOT_FOUND; result.err.code=RUN_NOT_FOUND]
+    deactivate SYS_RS
+    stop
+  end
+
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S2.4]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="run_meta"; kind=ARTIFACT; content_type="application/json"; payload_text="<run_meta_json>"}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate run_meta.json before parse."
+  end ref
+  SYS_Core --> SYS_RS : [step=S2.4r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S2.5]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=RUN_META_INVALID]
+    deactivate SYS_RS
+    stop
+  else [COND=RUN_META_VALID]
+    SYS_RS -> SYS_RS : run_meta=parse_run_meta("<run_meta_json>")\n[step=S2.6]
+  end
+end
+
+group S3 "RuntimeStore validates cursor and loads persisted run activity timeline"
+  SYS_RS -> SYS_RS : validate_progress_cursor(cursor)\n[step=S3.1]\n[vals cursor_validation=(PASS|FAIL)]
+  alt [COND=cursor_validation=FAIL]
+    SYS_RS --> SYS_AR : [step=S3.2]\n[vals result.outcome=err; result.err.category=INPUT; result.err.code=PROGRESS_CURSOR_INVALID]
+    deactivate SYS_RS
+    stop
+  end
+
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S3.3]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/activity/run/<run_ref>/timeline_index.json"; opts.encoding="utf-8"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S3.3r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : classify_timeline_index_read_error(result.err)\n[step=S3.4]\n[vals mapped_status=RUN_TIMELINE_UNAVAILABLE]
+    note over SYS_RS
+      Run may exist without any persisted activity entries yet.
+      RuntimeStore returns a minimal snapshot instead of failing.
+    end note
+    SYS_RS -> SYS_RS : timeline_index=derive_empty_timeline_index("run", run_ref)\n[step=S3.5]
+  else [COND=TIMELINE_INDEX_READ_OK]
+    SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S3.6]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="timeline_index"; kind=ARTIFACT; content_type="application/json"; payload_text="<timeline_index_json>"}]]
+    ref over SYS_RS, SYS_Core
+      expand=S_SYS_CORE_VALIDATE
+      op=IF_SYS_CORE_SERVICE.validate
+      note="Validate run timeline index before parse."
+    end ref
+    SYS_Core --> SYS_RS : [step=S3.6r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+    alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+      SYS_RS --> SYS_AR : [step=S3.7]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=RUN_TIMELINE_INVALID]
+      deactivate SYS_RS
+      stop
+    else [COND=TIMELINE_INDEX_VALID]
+      SYS_RS -> SYS_RS : timeline_index=parse_timeline_index("<timeline_index_json>")\n[step=S3.8]
+    end
+  end
+end
+
+group S4 "RuntimeStore derives progress snapshot"
+  SYS_RS -> SYS_RS : derive_progress_snapshot(run_ref, run_meta, timeline_index, cursor)\n[step=S4.1]\n[vals derive={run_state, current_phase, completed_failed_pending_counts, recent_visible_events_after_cursor, next_cursor, last_event_at}]
+end
+
+group S5 "RuntimeStore returns progress snapshot"
+  SYS_RS --> SYS_AR : [step=S5.1]\n[vals result.outcome=ok; result.ok.run_ref=run_ref; result.ok.run_state=<state>; result.ok.current_phase=<phase?>; result.ok.completed_task_count=<n>; result.ok.total_task_count=<m>; result.ok.failed_task_count=<k>; result.ok.pending_task_count=<p>; result.ok.percent_complete=<pct?>; result.ok.last_event_at=<ts?>; result.ok.recent_events=<event_list>; result.ok.next_cursor=<cursor?>]
+  deactivate SYS_RS
+end
+
+@enduml

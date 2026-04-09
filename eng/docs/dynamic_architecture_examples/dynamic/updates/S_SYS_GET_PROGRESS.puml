@@ -1,0 +1,88 @@
+@startuml
+title Get run progress from durable runtime history
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  control  "AgentRuntime" as SYS_AR <<component>>
+  control  "RuntimeStore" as SYS_RS <<component>>
+  control  "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over Human, EXT_AIOS #FFF8DC
+S_SYS_GET_PROGRESS
+[semantics read_path=true; no_publish=true]
+end note
+
+group S1 "Human requests current run progress"
+  Human -> SYS_UI : request_progress(run_ref:str, cursor?:ProgressCursor)\n[step=S1.1]
+  activate SYS_UI
+
+  SYS_UI -> SYS_CG : IF_SYS_CLIENT_GATEWAY_PROGRESS.get_progress(ctx:CallContext, run_ref:str, cursor?:ProgressCursor) -> Result[GetProgressResult]\n[step=S1.2]\n[connection use_port=P_UI_USE_CLIENT_GATEWAY_PROGRESS; prov_port=P_CG_PROV_CLIENT_GATEWAY_PROGRESS; conn=C_UI__CG__CLIENT_GATEWAY_PROGRESS]\n[vals run_ref=run_ref; cursor=cursor]
+  activate SYS_CG
+
+  SYS_CG -> SYS_AR : IF_SYS_AGENT_RUNTIME.get_progress(ctx:CallContext, run_ref:str, cursor?:ProgressCursor) -> Result[GetProgressResult]\n[step=S1.3]\n[connection use_port=P_CG_USE_AGENT_RUNTIME; prov_port=P_AR_PROV_AGENT_RUNTIME; conn=C_CG__AR__AGENT_RUNTIME]\n[vals run_ref=run_ref; cursor=cursor]
+  activate SYS_AR
+end
+
+group S2 "AgentRuntime loads durable progress snapshot"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_progress_snapshot(ctx:CallContext, run_ref:str, cursor?:ProgressCursor) -> Result[ProgressSnapshot]\n[step=S2.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=run_ref; cursor=cursor]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_GET_PROGRESS_SNAPSHOT
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=(RUN_NOT_FOUND|PROGRESS_CURSOR_INVALID)]
+
+  alt [COND=result.outcome=err and result.err.code=RUN_NOT_FOUND]
+    SYS_AR --> SYS_CG : [step=S2.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=RUN_NOT_FOUND]
+    SYS_CG --> SYS_UI : [step=S2.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=RUN_NOT_FOUND]
+    SYS_UI --> Human : show_error("Run not found")\n[step=S2.4]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=result.outcome=err and result.err.code=PROGRESS_CURSOR_INVALID]
+    SYS_AR --> SYS_CG : [step=S2.5]\n[vals result.outcome=err; result.err.category=INPUT; result.err.code=PROGRESS_CURSOR_INVALID]
+    SYS_CG --> SYS_UI : [step=S2.6]\n[vals result.outcome=err; result.err.category=INPUT; result.err.code=PROGRESS_CURSOR_INVALID]
+    SYS_UI --> Human : show_error("Progress cursor invalid")\n[step=S2.7]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+
+  else [COND=result.outcome=ok]
+
+group S3 "AgentRuntime derives user-facing progress view"
+  SYS_AR -> SYS_AR : map_progress_snapshot_to_view(snapshot)\n[step=S3.1]\n[vals derive={run_state, current_phase?, completed_task_count, total_task_count, failed_task_count, pending_task_count, percent_complete?, last_event_at, recent_events, next_cursor}]
+end
+
+group S4 "Progress is returned to UI"
+  SYS_AR --> SYS_CG : [step=S4.1]\n[vals result.outcome=ok; result.ok.run_ref=run_ref; result.ok.run_state=<state>; result.ok.current_phase=<phase?>; result.ok.completed_task_count=<n>; result.ok.total_task_count=<m>; result.ok.failed_task_count=<k>; result.ok.pending_task_count=<p>; result.ok.percent_complete=<pct?>; result.ok.last_event_at=<ts?>; result.ok.recent_events=<event_list>; result.ok.next_cursor=<cursor?>]
+  SYS_CG --> SYS_UI : [step=S4.2]\n[vals result.outcome=ok; result.ok.run_ref=run_ref; result.ok.run_state=<state>; result.ok.current_phase=<phase?>; result.ok.completed_task_count=<n>; result.ok.total_task_count=<m>; result.ok.failed_task_count=<k>; result.ok.pending_task_count=<p>; result.ok.percent_complete=<pct?>; result.ok.last_event_at=<ts?>; result.ok.recent_events=<event_list>; result.ok.next_cursor=<cursor?>]
+  SYS_UI --> Human : show_progress(run_ref=<run_ref>, run_state=<state>, completed=<n>/<m>, recent_events=<event_list>)\n[step=S4.3]
+
+  deactivate SYS_AR
+  deactivate SYS_CG
+  deactivate SYS_UI
+end
+
+  end
+end
+
+@enduml

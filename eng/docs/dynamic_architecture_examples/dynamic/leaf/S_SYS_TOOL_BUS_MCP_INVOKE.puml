@@ -1,0 +1,75 @@
+@startuml
+title Invoke external MCP capability through ToolsAdapter
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(System Component)" as SYS_CALLER
+
+box "AIOS — System Components" #F3F3F3
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  control "External MCP Capability\n(AISL / filesystem / integration tool)" as EXT_MCP <<external>>
+end box
+
+note over SYS_CALLER, EXT_MCP #FFF8DC
+S_SYS_TOOL_BUS_MCP_INVOKE
+end note
+
+note over SYS_Tools, EXT_MCP
+  ToolsAdapter owns server resolution, policy enforcement,
+  MCP transport execution, and normalized result mapping.
+  Callers request a stable server_id/tool pair; they do not manage transport details.
+end note
+
+group S1 "Caller requests MCP tool invocation through ToolsAdapter"
+  SYS_CALLER -> SYS_Tools : IF_SYS_TOOL_BUS.mcp.invoke(ctx:CallContext, server_id:str, tool:str, args:dict[str,Any], opts?:ToolInvokeOptions) -> Result[ToolResult]\n[step=S1.1]\n[connection use_port=<caller_use_tool_bus>; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=<caller__tools__tool_bus>]\n[vals server_id=server_id; tool=tool]
+  activate SYS_Tools
+end
+
+group S2 "ToolsAdapter resolves endpoint and enforces policy"
+  alt [COND=result.outcome=err and result.err.code=MCP_SERVER_NOT_FOUND]
+    SYS_Tools --> SYS_CALLER : [step=S2.1]\n[vals result.outcome=err; result.err.category=NOT_FOUND; result.err.code=MCP_SERVER_NOT_FOUND]
+    deactivate SYS_Tools
+
+  else [COND=result.outcome=err and result.err.code=MCP_CALL_DENIED]
+    SYS_Tools --> SYS_CALLER : [step=S2.2]\n[vals result.outcome=err; result.err.category=SECURITY; result.err.code=MCP_CALL_DENIED]
+    deactivate SYS_Tools
+
+  else [COND=result.outcome=ok]
+    note over SYS_Tools
+      ToolsAdapter may internally normalize:
+      - server_id -> endpoint resolution
+      - allowlist / policy checks
+      - timeout and retry defaults
+      - metadata attached to the successful ToolResult
+    end note
+  end
+end
+
+group S3 "ToolsAdapter performs MCP invocation"
+  SYS_Tools -> EXT_MCP : invoke MCP tool over resolved transport\n[step=S3.1]\n[vals server_id=server_id; tool=tool; args=args]
+  EXT_MCP --> SYS_Tools : [step=S3.1r]\n[vals result.outcome=(ok|err); result.ok.payload="<payload>"; result.ok.meta.server_id=server_id; result.ok.meta.tool=tool]
+
+  alt [COND=result.outcome=err and result.err.code=MCP_INVOKE_FAILED]
+    SYS_Tools --> SYS_CALLER : [step=S3.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=MCP_INVOKE_FAILED]
+    deactivate SYS_Tools
+
+  else [COND=result.outcome=ok]
+  end
+end
+
+group S4 "ToolsAdapter returns normalized ToolResult"
+  SYS_Tools --> SYS_CALLER : [step=S4.1]\n[vals result.outcome=ok; result.ok.payload="<payload>"; result.ok.meta.server_id=server_id; result.ok.meta.tool=tool]
+  deactivate SYS_Tools
+end
+
+@enduml

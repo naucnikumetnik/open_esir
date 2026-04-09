@@ -1,0 +1,95 @@
+@startuml
+title Route observable event to durable history and optional user progress
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentRuntime" as SYS_AR <<component>>
+  control "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, Human #FFF8DC
+S_SYS_OBSERVABILITY_EMIT
+[semantics emit_contract={best_effort=true; non_blocking=true; always_returns_ok=true; callers_do_not_branch_on_ack=true; no_recursive_emit=true}]
+end note
+
+note over SYS_Obs, Human
+  Accepts one observable event and routes it to durable persistence
+  and optional live user publication as distinct effects.
+end note
+
+group S1 "Caller emits observable event"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S1.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]
+  activate SYS_Obs
+end
+
+group S2 "Observability validates and classifies event"
+  SYS_Obs -> SYS_Obs : validate_and_enrich(event)\n[step=S2.1]\n[vals derive.timestamp=<now>; derive.source_ref=ctx.source_ref; derive.correlation_ref=ctx.correlation_ref; derive.scope_kind=(event.scope_kind|ctx.scope_kind); derive.scope_ref=(event.scope_ref|ctx.scope_ref); derive.retention=(event.retention|DURABLE)]
+  note over SYS_Obs
+    After enrichment the event envelope is mutated in-place:
+    event.scope_kind, event.scope_ref, event.timestamp
+    carry derived values for all downstream consumers.
+  end note
+  
+  alt [COND=result.outcome=ok and result.ok.status=EVENT_INVALID]
+    SYS_Obs --> SYS_AR : [step=S2.2]\n[vals result.outcome=ok; result.ok.accepted=false; result.ok.drop_reason=EVENT_INVALID; result.ok.durable_status=SKIPPED; result.ok.live_status=SKIPPED]
+    deactivate SYS_Obs
+
+  else [COND=result.outcome=ok and result.ok.status=EVENT_VALID]
+  end
+end
+
+opt [COND=event.retention=DURABLE]
+  group S3 "Durable event history is persisted"
+    SYS_Obs -> SYS_RS : IF_SYS_RUNTIME_STORE.append_telemetry(ctx:CallContext, event:EventEnvelope) -> Result[TelemetryAck]\n[step=S3.1]\n[connection use_port=P_OBS_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_OBS__RS__RUNTIME_STORE]
+    ref over SYS_RS, SYS_Tools, EXT_AIOS
+      expand=S_SYS_RUNTIME_STORE_APPEND_TELEMETRY
+      ref_mode=call_return
+    end ref
+    SYS_RS --> SYS_Obs : [step=S3.1r]\n[vals result.outcome=(ok|err); result.err.code=TELEMETRY_APPEND_FAILED]
+
+    alt [COND=result.outcome=err]
+
+    else [COND=result.outcome=ok]
+    end
+  end
+end
+
+opt [COND=event.visibility in {user,both} and event.scope_kind=run]
+  note over SYS_Obs
+    MVP rule: only scope_kind=run events enter live progress publication.
+    Pre-run events (plan-world) are delivered through the return chain only.
+  end note
+  group S4 "User-visible progress publication is attempted"
+    SYS_Obs -> SYS_CG : IF_SYS_CLIENT_GATEWAY_PROGRESS.publish_progress_update(ctx:CallContext, scope_kind:ObservableScopeKind, scope_ref:str, event:EventEnvelope) -> Result[PublishProgressUpdateResult]\n[step=S4.1]\n[connection use_port=P_OBS_USE_CLIENT_GATEWAY_PROGRESS; prov_port=P_CG_PROV_CLIENT_GATEWAY_PROGRESS; conn=C_OBS__CG__CLIENT_GATEWAY_PROGRESS]\n[vals scope_kind=derived.scope_kind; scope_ref=derived.scope_ref; event.ev=event.ev; event.visibility=event.visibility]
+    ref over SYS_Obs, SYS_CG, SYS_UI, Human
+      expand=S_SYS_PUBLISH_PROGRESS_UPDATE
+      ref_mode=call_return
+    end ref
+    SYS_CG --> SYS_Obs : [step=S4.1r]\n[vals result.outcome=ok; result.ok.delivery_status=(DELIVERED|PARTIAL_DELIVERY|DELIVERY_FAILED|NO_ACTIVE_SUBSCRIBERS)]
+  end
+end
+
+group S5 "Emit acknowledgement returned to caller"
+  SYS_Obs --> SYS_AR : [step=S5.1]\n[vals result.outcome=ok; result.ok.accepted=true; result.ok.durable_status=(APPENDED|FAILED|SKIPPED); result.ok.live_status=(DELIVERED|PARTIAL_DELIVERY|DELIVERY_FAILED|NO_ACTIVE_SUBSCRIBERS|SKIPPED)]
+  deactivate SYS_Obs
+end
+
+@enduml

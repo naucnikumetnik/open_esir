@@ -1,0 +1,44 @@
+@startuml
+title Prepare normalized execution intent from admissible request inputs
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "Core" as SYS_Core <<component>>
+end box
+
+note over SYS_AR, SYS_Core #FFF8DC
+S_SYS_CORE_PREPARE_EXECUTION_INTENT
+end note
+
+note over SYS_Core
+  Core owns request admissibility, execution-kind selection, review-policy
+  normalization, target identity normalization, and planning-basis extraction.
+  It consumes already-resolved project profile, target location, and target blob.
+  Internal policy and normalization steps remain collapsed here.
+  It does not perform artifact I/O or persistence in this operation.
+end note
+
+group S1 "AgentRuntime requests execution-intent preparation"
+  SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.prepare_execution_intent(ctx:CallContext, req:ExecuteRequest, profile:ProjectProfile, target_loc:ResolvedLocation, target_blob:ArtifactBlob) -> Result[PreparedExecutionIntent]\n[step=S1.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals req.requested_mode=req.requested_mode; req.review_mode=req.review_mode; req.user_prefs=req.user_prefs; target_loc.endpoint_kind=target_loc.endpoint_kind]
+  activate SYS_Core
+
+  alt [COND=REQUEST_INVALID]
+    SYS_Core --> SYS_AR : [step=S1.1err]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=EXECUTION_REQUEST_INVALID]
+    deactivate SYS_Core
+  else [COND=REQUEST_ADMISSIBLE]
+    SYS_Core --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok; result.ok.execution_kind="<unit_or_workflow>"; result.ok.review_policy="<resolved_review_policy>"; result.ok.target_ref="<resolved_target_ref>"; result.ok.planning_basis.basis_kind="<unit_detailed_design_or_dynamic_view>"; result.ok.planning_basis.task_seeds="<normalized_task_seeds>"; result.ok.source_artifact_kind="<unit_detailed_design_or_dynamic_view>"; result.ok.realization_mode="<implementation_or_direct_execution>"]
+    deactivate SYS_Core
+  end
+end
+
+@enduml

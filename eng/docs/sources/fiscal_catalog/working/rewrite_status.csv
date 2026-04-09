@@ -1,0 +1,23 @@
+Artifact,CurrentState,Notes
+contracts.csv,structural_rewrite_applied,Contract surface was rewritten to reflect second-pass reconciliation including HTTP versus APDU recovery split official audit APDU naming and the newly normalized TaxCore.API Shared and TaxCore.API E-SDC public backend contracts
+types.csv,partial_rewrite_applied,New official audit APDU and TaxCore.API backend types were added and guidance or reference-only notes were aligned for public verification certificate-helper rows and source-exact rename visibility
+enums.csv,partial_rewrite_applied,Reference-only certificate enum family was explicitly marked while core domain protocol and newly normalized TaxCore backend enum families remain structurally stable
+rules.csv,partial_rewrite_applied,High-risk baseline versus guidance versus reference-only rules were clarified in-place and now also include TaxCore backend token audit and shared-surface normalization rules
+fields.csv,partial_rewrite_applied,Guidance-backed public verification fields reference-only certificate-helper fields and newly normalized TaxCore backend field graphs were explicitly classified
+errors_statuses.csv,partial_rewrite_applied,Reference-only transport and smart-card adapter status rows were explicitly marked while core code families now also include the normalized AuditDataStatus backend family
+reconciliation_matrix.csv,authoritative_reconciliation_state,This remains the row-level reconciliation authority even after individual table rewrites
+final_projection.csv,derived_projection_generated,This is the machine-readable projection of reconciliation outcomes into core guidance derived reference-only and transform buckets
+final_projection_summary.csv,summary_generated,This summarizes the reconciliation projection buckets by family
+current_catalog_layers.csv,row_level_layer_map_generated,Every concrete row in the current working tables now has an explicit core guidance derived or reference-only classification
+current_catalog_summary.csv,summary_generated,This summarizes the current row-level catalog layers by artifact
+current_catalog_unmapped.csv,coverage_guard_empty,This should remain empty and currently confirms that no concrete rows are left without a current catalog layer
+finalized_contracts.csv,finalized_view_generated,This combines the current contracts table with row-level catalog layer and basis columns
+finalized_types.csv,finalized_view_generated,This combines the current types table with row-level catalog layer and basis columns
+finalized_enums.csv,finalized_view_generated,This combines the current enums table with row-level catalog layer and basis columns
+finalized_rules.csv,finalized_view_generated,This combines the current rules table with row-level catalog layer and basis columns
+finalized_fields.csv,finalized_view_generated,This combines the current fields table with row-level catalog layer and basis columns
+finalized_errors_statuses.csv,finalized_view_generated,This combines the current errors table with row-level catalog layer and basis columns
+finalized_views_summary.csv,summary_generated,This lists the row counts for each finalized per-artifact view
+implementation_handoff.md,implementation_handoff_generated,This is the implementation-facing split of the reconciled catalog into domain DTO validator and adapter layers
+implementation_units.csv,implementation_matrix_generated,This is the compact machine-readable implementation-unit matrix built on top of the finalized catalog views and it now includes normalized TaxCore.API Shared and TaxCore.API E-SDC units rather than pending placeholders
+source_exact_reconciliation.csv,source_exact_mapping_generated,This maps source-exact published names to current canonical names and now distinguishes canonical renames from real missing-surface gaps that were subsequently normalized

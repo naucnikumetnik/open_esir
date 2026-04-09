@@ -1,0 +1,46 @@
+@startuml
+title Validate generation output and prepare target update request
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime / ExecEngine)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "Core" as SYS_Core <<component>>
+end box
+
+note over SYS_AR, SYS_Core #FFF8DC
+S_SYS_CORE_VALIDATE_AND_BUILD_TARGET_UPDATE
+end note
+
+note over SYS_Core
+  Core consumes a prepared execution request and generation result.
+  Output validation and target-update derivation remain collapsed in this
+  black-box service leaf.
+  It determines NEEDS_CHANGE vs TARGET_UPDATE_READY without writing artifacts itself.
+end note
+
+group S1 "AgentRuntime requests target-update preparation"
+  SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.validate_and_build_target_update(ctx:CallContext, prepared:any, generation_result:any, fw:FrameworkHandle) -> Result[TargetUpdateRequest]\n[step=S1.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals prepared.status=EXECUTION_REQUEST_READY; generation_result="<payload_or_none>"; fw=fw]
+  activate SYS_Core
+
+  alt [COND=TARGET_UPDATE_PREPARATION_FAILED]
+    SYS_Core --> SYS_AR : [step=S1.1err]\n[vals result.outcome=err; result.err.category=(VALIDATION|INTERNAL); result.err.code=TARGET_UPDATE_PREPARATION_FAILED]
+    deactivate SYS_Core
+  else [COND=OUTPUT_INVALID_NEEDS_CHANGE]
+    SYS_Core --> SYS_AR : [step=S1.1nc]\n[vals result.outcome=ok; result.ok.status=NEEDS_CHANGE]
+    deactivate SYS_Core
+  else [COND=OUTPUT_VALID]
+    SYS_Core --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok; result.ok.status=TARGET_UPDATE_READY; result.ok.target_ref="<output_target_ref>"]
+    deactivate SYS_Core
+  end
+end
+
+@enduml

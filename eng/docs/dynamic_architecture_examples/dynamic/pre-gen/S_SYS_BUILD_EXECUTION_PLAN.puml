@@ -1,0 +1,203 @@
+@startuml
+title Build execution plan (draft plan + confirmation-ready summary)
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  control  "AgentRuntime" as SYS_AR <<component>>
+  control  "Core" as SYS_Core <<component>>
+  control  "AgentStore" as SYS_AS <<component>>
+  control  "RuntimeStore" as SYS_RS <<component>>
+  control  "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+  control  "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over Human, EXT_AIOS #FFF8DC
+S_SYS_BUILD_EXECUTION_PLAN
+end note
+
+note over SYS_AR
+  This scenario builds and persists a draft execution plan only.
+  It does not create run_ref, start a run, or dispatch tasks.
+  Human confirmation is always required after a successful build.
+  Run creation happens only when the draft plan is confirmed.
+end note
+
+note over SYS_AR
+  Review policy is materialized in the execution plan as separate dependent parent tasks.
+  Review tasks carry dependency edges pointing to the producing task.
+  There is no lifecycle substate on the producing task for pending review.
+end note
+
+group S1 "Human requests plan build from prepared execution intent"
+  Human -> SYS_UI : request_plan_build(prepared_intent_ref:str)\n[step=S1.1]
+  activate SYS_UI
+
+  SYS_UI -> SYS_CG : IF_SYS_CLIENT_GATEWAY_EXECUTION.build_execution_plan(ctx:CallContext, prepared_intent_ref:str) -> Result[BuildExecutionPlanResult]\n[step=S1.2]\n[connection use_port=P_UI_USE_CLIENT_GATEWAY_EXECUTION; prov_port=P_CG_PROV_CLIENT_GATEWAY_EXECUTION; conn=C_UI__CG__CLIENT_GATEWAY_EXECUTION]\n[vals prepared_intent_ref=prepared_intent_ref]
+  activate SYS_CG
+
+  SYS_CG -> SYS_AR : IF_SYS_AGENT_RUNTIME.build_execution_plan(ctx:CallContext, prepared_intent_ref:str) -> Result[BuildExecutionPlanResult]\n[step=S1.3]\n[connection use_port=P_CG_USE_AGENT_RUNTIME; prov_port=P_AR_PROV_AGENT_RUNTIME; conn=C_CG__AR__AGENT_RUNTIME]\n[vals prepared_intent_ref=prepared_intent_ref]
+  activate SYS_AR
+end
+
+group S2 "AgentRuntime loads prepared execution intent"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_BUILD_STARTED; event.severity=INFO; event.visibility=internal]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S2.1r]\n[vals result.outcome=ok]
+
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.get_prepared_execution_intent(ctx:CallContext, prepared_intent_ref:str) -> Result[PreparedExecutionIntent]\n[step=S2.2]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals prepared_intent_ref=prepared_intent_ref]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_GET_PREPARED_EXECUTION_INTENT
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S2.2r]\n[vals result.outcome=(ok|err); result.err.code=PREPARED_INTENT_UNAVAILABLE]
+
+  alt [COND=result.outcome=err and result.err.code=PREPARED_INTENT_UNAVAILABLE]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S2.3]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_BUILD_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=PREPARED_INTENT_UNAVAILABLE]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S2.3r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S2.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PREPARED_INTENT_UNAVAILABLE]
+    SYS_CG --> SYS_UI : [step=S2.5]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=PREPARED_INTENT_UNAVAILABLE]
+    SYS_UI --> Human : show_error("Prepared execution intent unavailable")\n[step=S2.6]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+    
+  end
+end
+
+group S3 "AgentRuntime gathers planning constraints and candidate execution resources"
+  SYS_AR -> SYS_AS : IF_SYS_AGENT_STORE.list_planning_candidates(ctx:CallContext, intent:PreparedExecutionIntent) -> Result[PlanningCandidateSet]\n[step=S3.1]\n[connection use_port=P_AR_USE_AGENT_STORE; prov_port=P_AS_PROV_AGENT_STORE; conn=C_AR__AS__AGENT_STORE]\n[vals execution_kind=intent.execution_kind; review_policy=intent.review_policy; user_prefs=intent.user_prefs]
+
+  ref over SYS_AS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_AGENT_STORE_LIST_PLANNING_CANDIDATES
+    ref_mode=call_return
+  end ref
+
+  SYS_AS --> SYS_AR : [step=S3.1r]\n[vals result.outcome=(ok|err); result.err.code=(AGENT_INVENTORY_UNAVAILABLE|AGENT_MODEL_META_UNAVAILABLE|NO_FEASIBLE_PLANNING_CANDIDATES); result.ok.count=<n>; result.ok.candidates=<planning_candidate_set>]
+
+  SYS_AR -> SYS_AR : classify_planning_feasibility(result)\n[step=S3.1c]\n[vals on_err={status=NEEDS_CHANGE; reason=NO_FEASIBLE_PLANNING_CANDIDATES}; on_ok_empty={status=NEEDS_CHANGE; reason=NO_FEASIBLE_PLANNING_CANDIDATES}; on_ok={continue}]
+
+  alt [COND=classified.status=NEEDS_CHANGE]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S3.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_BUILD_REJECTED; event.severity=WARN; event.visibility=internal; event.data.reason=NO_FEASIBLE_PLANNING_CANDIDATES]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S3.2r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S3.3]\n[vals result.outcome=ok; result.ok.status=NEEDS_CHANGE; result.ok.reason=NO_FEASIBLE_PLANNING_CANDIDATES]
+    SYS_CG --> SYS_UI : [step=S3.4]\n[vals result.outcome=ok; result.ok.status=NEEDS_CHANGE; result.ok.reason=NO_FEASIBLE_PLANNING_CANDIDATES]
+    SYS_UI --> Human : update_view_state(status="needs_change", reason="NO_FEASIBLE_PLANNING_CANDIDATES")\n[step=S3.5]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+    
+  end
+end
+
+group S4 "Core builds draft execution plan"
+  SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.build_execution_plan(ctx:CallContext, intent:PreparedExecutionIntent, candidates:PlanningCandidateSet) -> Result[DraftExecutionPlan]\n[step=S4.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals execution_kind=intent.execution_kind; target_ref=intent.target_ref; review_policy=intent.review_policy; planning_basis.kind=intent.planning_basis.basis_kind; planning_basis.task_seed_count="<n>"]
+  ref over SYS_AR, SYS_Core
+    expand=S_SYS_CORE_BUILD_EXECUTION_PLAN
+    ref_mode=call_return
+  end ref
+  SYS_Core --> SYS_AR : [step=S4.1r]\n[vals result.outcome=(ok|err); result.err.code=PLAN_BUILD_FAILED]
+
+  alt [COND=result.outcome=err and result.err.code=PLAN_BUILD_FAILED]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S4.2]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_BUILD_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=PLAN_BUILD_FAILED]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S4.2r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S4.3]\n[vals result.outcome=err; result.err.category=INTERNAL; result.err.code=PLAN_BUILD_FAILED]
+    SYS_CG --> SYS_UI : [step=S4.4]\n[vals result.outcome=err; result.err.category=INTERNAL; result.err.code=PLAN_BUILD_FAILED]
+    SYS_UI --> Human : show_error("Execution plan build failed")\n[step=S4.5]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+    
+  end
+end
+
+group S5 "AgentRuntime stamps traceability, derives summary, and persists draft plan"
+  SYS_AR -> SYS_AR : stamp_plan_traceability_and_derive_summary(draft_plan, prepared_intent_ref, intent)\n[step=S5.1]\n[vals draft_plan.prepared_intent_ref=prepared_intent_ref; derive={task_count, review_task_count, estimated_duration?, critical_inputs}]
+  note over SYS_AR
+    Statically knowable task dependencies and required refs
+    are expected to be captured here and pinned into draft plan artifacts.
+    AgentRuntime stamps prepared_intent_ref here because Core builds the plan
+    without receiving the persisted prepared-intent reference.
+    The persisted artifact is still a draft plan, not a run-scoped plan.
+  end note
+
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.put_draft_execution_plan(ctx:CallContext, plan:DraftExecutionPlan, summary:DraftExecutionPlanSummary) -> Result[DraftPlanRef]\n[step=S5.2]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals plan.state=READY_FOR_CONFIRMATION; plan.prepared_intent_ref=prepared_intent_ref; summary.approval_mode=user_confirm]
+
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_RUNTIME_STORE_PUT_DRAFT_EXECUTION_PLAN
+    ref_mode=call_return
+  end ref
+
+  SYS_RS --> SYS_AR : [step=S5.2r]\n[vals result.outcome=(ok|err); result.err.code=DRAFT_PLAN_PERSIST_FAILED; result.ok.plan_ref=<draft_plan_ref>; result.ok.plan_state=READY_FOR_CONFIRMATION]
+
+  alt [COND=result.outcome=err and result.err.code=DRAFT_PLAN_PERSIST_FAILED]
+    SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S5.3]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_BUILD_FAILED; event.severity=ERROR; event.visibility=internal; event.data.reason=DRAFT_PLAN_PERSIST_FAILED]
+    ref over SYS_AR, SYS_Obs
+      expand=S_SYS_OBSERVABILITY_EMIT
+      ref_mode=call_return
+    end ref
+    SYS_Obs --> SYS_AR : [step=S5.3r]\n[vals result.outcome=ok]
+
+    SYS_AR --> SYS_CG : [step=S5.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=DRAFT_PLAN_PERSIST_FAILED]
+    SYS_CG --> SYS_UI : [step=S5.5]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=DRAFT_PLAN_PERSIST_FAILED]
+    SYS_UI --> Human : show_error("Draft execution plan could not be stored")\n[step=S5.6]
+    deactivate SYS_AR
+    deactivate SYS_CG
+    deactivate SYS_UI
+    
+  end
+end
+
+group S6 "Draft plan summary is returned for human confirmation"
+  SYS_AR -> SYS_Obs : IF_SYS_OBSERVABILITY.emit(ctx:CallContext, event:EventEnvelope) -> Result[EmitAck]\n[step=S6.1]\n[connection use_port=P_AR_USE_OBSERVABILITY; prov_port=P_OBS_PROV_OBSERVABILITY; conn=C_AR__OBS__OBSERVABILITY]\n[vals event.ev=EXECUTION_PLAN_BUILD_DONE; event.severity=INFO; event.visibility=internal]
+  ref over SYS_AR, SYS_Obs
+    expand=S_SYS_OBSERVABILITY_EMIT
+    ref_mode=call_return
+  end ref
+  SYS_Obs --> SYS_AR : [step=S6.1r]\n[vals result.outcome=ok]
+
+  SYS_AR --> SYS_CG : [step=S6.2]\n[vals result.outcome=ok; result.ok.status=READY_FOR_CONFIRMATION; result.ok.plan_ref=<draft_plan_ref>; result.ok.task_count=<n>; result.ok.review_task_count=<m>; result.ok.estimated_duration=<estimate>; result.ok.approval_mode=user_confirm]
+  SYS_CG --> SYS_UI : [step=S6.3]\n[vals result.outcome=ok; result.ok.status=READY_FOR_CONFIRMATION; result.ok.plan_ref=<draft_plan_ref>; result.ok.task_count=<n>; result.ok.review_task_count=<m>; result.ok.estimated_duration=<estimate>; result.ok.approval_mode=user_confirm]
+  SYS_UI --> Human : show_execution_plan_summary(plan_ref=<draft_plan_ref>, status=READY_FOR_CONFIRMATION, approval_mode=user_confirm)\n[step=S6.4]
+
+  deactivate SYS_AR
+  deactivate SYS_CG
+  deactivate SYS_UI
+end
+
+@enduml

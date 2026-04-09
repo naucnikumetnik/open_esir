@@ -1,0 +1,44 @@
+@startuml
+title Build draft execution plan from prepared intent and planning candidates
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "Core" as SYS_Core <<component>>
+end box
+
+note over SYS_AR, SYS_Core #FFF8DC
+S_SYS_CORE_BUILD_EXECUTION_PLAN
+end note
+
+note over SYS_Core
+  Core owns task-graph construction, candidate selection,
+  assignee binding, batching-policy pinning, and review-task materialization.
+  It consumes normalized planning_basis.task_seeds from PreparedExecutionIntent.
+  Internal planning heuristics and framework-aware structuring remain collapsed here.
+  It returns a draft execution plan only; runtime persistence stays outside Core.
+end note
+
+group S1 "AgentRuntime requests draft-plan construction"
+  SYS_AR -> SYS_Core : IF_SYS_CORE_SERVICE.build_execution_plan(ctx:CallContext, intent:PreparedExecutionIntent, candidates:PlanningCandidateSet) -> Result[DraftExecutionPlan]\n[step=S1.1]\n[connection use_port=P_AR_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AR__CORE__CORE_SERVICE]\n[vals execution_kind=intent.execution_kind; review_policy=intent.review_policy; planning_basis.kind=intent.planning_basis.basis_kind; planning_basis.task_seed_count="<n>"; candidates.count="<n>"]
+  activate SYS_Core
+
+  alt [COND=PLAN_BUILD_FAILED]
+    SYS_Core --> SYS_AR : [step=S1.1err]\n[vals result.outcome=err; result.err.category=INTERNAL; result.err.code=PLAN_BUILD_FAILED]
+    deactivate SYS_Core
+  else [COND=DRAFT_PLAN_READY]
+    SYS_Core --> SYS_AR : [step=S1.1r]\n[vals result.outcome=ok; result.ok.plan_state=READY_FOR_CONFIRMATION; result.ok.selected_agent="<agent_handle>"; result.ok.selected_model_ref="<model_ref>"; result.ok.parent_task_ids="<ordered_parent_task_ids>"; result.ok.tasks="<task_graph_with_dependent_review_tasks>"]
+    deactivate SYS_Core
+  end
+end
+
+@enduml

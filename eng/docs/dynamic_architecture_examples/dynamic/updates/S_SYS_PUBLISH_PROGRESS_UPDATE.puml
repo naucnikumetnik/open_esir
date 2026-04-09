@@ -1,0 +1,86 @@
+@startuml
+title Publish progress update to active subscribers
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Human\n(Developer/Operator)" as Human
+
+box "AIOS — System Components" #F3F3F3
+  control  "Observability\n(EventBus/Logger)" as SYS_Obs <<component>>
+  boundary "ClientGateway" as SYS_CG <<component>>
+  boundary "UI\n(Web / CLI / Chat)" as SYS_UI <<component>>
+end box
+
+note over Human, SYS_UI #FFF8DC
+S_SYS_PUBLISH_PROGRESS_UPDATE
+end note
+
+note over SYS_Obs, SYS_UI
+  This scenario performs live user-facing publication only.
+  It does not persist telemetry/history into .aios.
+  Durable storage is handled earlier by the parent observability flow.
+end note
+
+note over SYS_CG
+  Delivery is best-effort in this slice.
+  Per-subscriber push failure does not abort fan-out to remaining subscribers.
+  Delivery results are aggregated and returned to Observability.
+end note
+
+group S1 "Observability requests live publication of user-visible event"
+  SYS_Obs -> SYS_CG : IF_SYS_CLIENT_GATEWAY_PROGRESS.publish_progress_update(ctx:CallContext, scope_kind:ObservableScopeKind, scope_ref:str, event:EventEnvelope) -> Result[PublishProgressUpdateResult]\n[step=S1.1]\n[connection use_port=P_OBS_USE_CLIENT_GATEWAY_PROGRESS; prov_port=P_CG_PROV_CLIENT_GATEWAY_PROGRESS; conn=C_OBS__CG__CLIENT_GATEWAY_PROGRESS]\n[vals scope_kind=scope_kind; scope_ref=scope_ref; event.ev=event.ev; event.visibility=(user|both)]
+  activate SYS_CG
+end
+
+group S2 "ClientGateway resolves active matching subscribers"
+  SYS_CG -> SYS_CG : resolve_matching_subscribers(scope_kind, scope_ref)\n[step=S2.1]\n[vals match={active subscriptions whose filter covers scope_kind/scope_ref}]
+  note over SYS_CG
+    Subscription/session state is runtime-ephemeral and not part of .aios.
+    Matching may yield zero, one, or multiple active subscribers.
+  end note
+
+  alt [COND=result.outcome=ok and result.ok.status=NO_MATCHING_ACTIVE_SUBSCRIBERS]
+    SYS_CG --> SYS_Obs : [step=S2.2]\n[vals result.outcome=ok; result.ok.delivery_status=NO_ACTIVE_SUBSCRIBERS; result.ok.delivered_count=0; result.ok.failed_count=0]
+    deactivate SYS_CG
+
+  else [COND=result.outcome=ok]
+  end
+end
+
+group S3 "ClientGateway forwards update to each matching UI session"
+  loop [for each matching active subscriber/session]
+    SYS_CG -> SYS_UI : push_progress_update(subscription_ref:str, scope_kind:ObservableScopeKind, scope_ref:str, event:EventEnvelope) -> Result[PushAck]\n[step=S3.1]\n[vals subscription_ref=<sub_ref>; event.ev=event.ev; event.user_msg=event.user_msg?; event.data=event.data?]
+    activate SYS_UI
+
+    SYS_UI -> SYS_UI : map_event_to_user_update(event)\n[step=S3.2]\n[vals derive={title, message, progress_delta?, status_badge?, timestamp}]
+    SYS_UI --> Human : show_progress_update(scope_ref=<scope_ref>, message=<mapped_message>)\n[step=S3.3]
+    SYS_UI --> SYS_CG : [step=S3.4]\n[vals result.outcome=(ok|err); result.err.code=PUSH_FAILED]
+    deactivate SYS_UI
+
+    alt [COND=result.outcome=err and result.err.code=PUSH_FAILED]
+      note over SYS_CG
+        Failed delivery for this subscriber is recorded in aggregation state.
+        Gateway may also mark the session/subscription stale in a later slice.
+        Delivery continues for remaining subscribers.
+      end note
+
+    else [COND=result.outcome=ok]
+    end
+  end
+end
+
+group S4 "Delivery result is aggregated and returned"
+  SYS_CG -> SYS_CG : aggregate_delivery_results()\n[step=S4.1]\n[vals derive={delivered_count, failed_count, delivery_status=(DELIVERED|PARTIAL_DELIVERY|DELIVERY_FAILED)}]
+
+  SYS_CG --> SYS_Obs : [step=S4.2]\n[vals result.outcome=ok; result.ok.delivery_status=(DELIVERED|PARTIAL_DELIVERY|DELIVERY_FAILED); result.ok.delivered_count=<n>; result.ok.failed_count=<m>]
+  deactivate SYS_CG
+end
+
+@enduml

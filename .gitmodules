@@ -1,21 +1,21 @@
-[submodule "knowledge_base/VSDCRequestSubmitterV3.0"]
-	path = knowledge_base/VSDCRequestSubmitterV3.0
+[submodule "eng/docs/sources/VSDCRequestSubmitterV3.0"]
+	path = eng/docs/sources/VSDCRequestSubmitterV3.0
 	url = https://github.com/Data-Tech-International/VSDCRequestSubmitterV3.0.git
-[submodule "knowledge_base/Dti.TaxCore.Examples.SESignInvoiceV3.0"]
-	path = knowledge_base/Dti.TaxCore.Examples.SESignInvoiceV3.0
+[submodule "eng/docs/sources/Dti.TaxCore.Examples.SESignInvoiceV3.0"]
+	path = eng/docs/sources/Dti.TaxCore.Examples.SESignInvoiceV3.0
 	url = https://github.com/Data-Tech-International/Dti.TaxCore.Examples.SESignInvoiceV3.0.git
-[submodule "knowledge_base/Dti.TaxCore.Examples.SESignInvoice"]
-	path = knowledge_base/Dti.TaxCore.Examples.SESignInvoice
+[submodule "eng/docs/sources/Dti.TaxCore.Examples.SESignInvoice"]
+	path = eng/docs/sources/Dti.TaxCore.Examples.SESignInvoice
 	url = https://github.com/Data-Tech-International/Dti.TaxCore.Examples.SESignInvoice.git
-[submodule "knowledge_base/Secure-Element-Reader"]
-	path = knowledge_base/Secure-Element-Reader
+[submodule "eng/docs/sources/Secure-Element-Reader"]
+	path = eng/docs/sources/Secure-Element-Reader
 	url = https://github.com/Data-Tech-International/Secure-Element-Reader.git
-[submodule "knowledge_base/TaxCore.Libraries.Certificates"]
-	path = knowledge_base/TaxCore.Libraries.Certificates
+[submodule "eng/docs/sources/TaxCore.Libraries.Certificates"]
+	path = eng/docs/sources/TaxCore.Libraries.Certificates
 	url = https://github.com/Data-Tech-International/TaxCore.Libraries.Certificates.git
-[submodule "knowledge_base/Taxcore-MobilePOS-Android"]
-	path = knowledge_base/Taxcore-MobilePOS-Android
+[submodule "eng/docs/sources/Taxcore-MobilePOS-Android"]
+	path = eng/docs/sources/Taxcore-MobilePOS-Android
 	url = https://github.com/Data-Tech-International/Taxcore-MobilePOS-Android.git
-[submodule "knowledge_base/agent_skills"]
-	path = knowledge_base/agent_skills
+[submodule "eng/docs/sources/agent_skills"]
+	path = eng/docs/agent_skills
 	url = git@github.com:naucnikumetnik/agent_skills.git

@@ -1,0 +1,120 @@
+@startuml
+title Record agent usage event to AIOS managed storage (best-effort telemetry)
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime / ExecUnit)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentStore" as SYS_AS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_AGENT_STORE_RECORD_AGENT_USAGE
+ap_ref = AP_RECORD_AGENT_USAGE
+end note
+
+note over SYS_AS
+  This operation is best-effort telemetry.
+  Caller MUST treat failures as non-fatal (caller policy, not enforced here).
+  AgentStore validates shape via Core, then persists usage event.
+end note
+
+' ============================================================================
+' S1 — Caller requests usage recording
+' ============================================================================
+group S1 "Caller submits usage event"
+  SYS_AR -> SYS_AS : IF_SYS_AGENT_STORE.record_agent_usage(ctx:CallContext, agent:AgentHandle, usage:AgentUsageEvent) -> Result[Ack]\n[step=S1.1]\n[connection use_port=P_AR_USE_AGENT_STORE; prov_port=P_AS_PROV_AGENT_STORE; conn=C_AR__AS__AGENT_STORE]\n[vals agent.id=<agent_id>; usage=<AgentUsageEvent>]
+  activate SYS_AS
+
+  SYS_AS -> SYS_AS : derive_model_ref(agent) -> ModelRef\n[step=S1.2]\n[vals model_ref:ModelRef=agent.id]
+end
+
+' ============================================================================
+' S2 — Validate usage payload shape
+' ============================================================================
+group S2 "Validate usage event shape (Core)"
+  SYS_AS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S2.1]\n[connection use_port=P_AS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AS__CORE__CORE_SERVICE]\n[vals items=[{item_id="usage"; kind=AGENT_USAGE_EVENT; content_type="application/json"; payload_any=usage}]]
+  ref over SYS_AS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate(list-of-1) for AGENT_USAGE_EVENT."
+  end ref
+  SYS_Core --> SYS_AS : [step=S2.1r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_AS --> SYS_AR : [step=S2.F1]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_USAGE_RECORD_FAILED; result.err.data.reason="USAGE_INVALID"; result.err.data.model_ref=model_ref]
+    deactivate SYS_AS
+    stop
+  else [COND=USAGE_VALID]
+  end
+end
+
+' ============================================================================
+' S3 — Persist usage event (append-like semantics via per-event file)
+' ============================================================================
+group S3 "Persist usage event to .aios (per-event file)"
+  SYS_AS -> SYS_AS : allocate_usage_event_id() -> UsageEventId\n[step=S3.1]\n[vals usage_event_id:UsageEventId=<uuid_or_ts_based_id>]
+
+  SYS_AS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.ensure_dir(ctx:CallContext, path:str) -> Result[WriteResult]\n[step=S3.2]\n[connection use_port=P_AS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AS__TOOLS__TOOL_BUS]\n[vals path=".aios/agents_database/<model_ref>/usage/events"]
+  ref over SYS_AS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_ENSURE_DIR
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_AS : [step=S3.2r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    SYS_AS --> SYS_AR : [step=S3.F1]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_USAGE_RECORD_FAILED; result.err.data.reason="ENSURE_DIR_FAILED"; result.err.data.model_ref=model_ref]
+    deactivate SYS_AS
+    stop
+  end
+
+  SYS_AS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S3.3]\n[connection use_port=P_AS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AS__TOOLS__TOOL_BUS]\n[vals path=".aios/agents_database/<model_ref>/usage/events/<usage_event_id>.json"; text=<usage_json>; opts.atomic=true]
+  ref over SYS_AS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_AS : [step=S3.3r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    SYS_AS --> SYS_AR : [step=S3.F2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_USAGE_RECORD_FAILED; result.err.data.reason="WRITE_FAILED"; result.err.data.model_ref=model_ref]
+    deactivate SYS_AS
+    stop
+  else [COND=WRITE_OK]
+  end
+end
+
+' ============================================================================
+' S4 — Optional derived stats update (best-effort inside AgentStore)
+' ============================================================================
+group S4 "Optional: update derived usage stats (best-effort)"
+  opt [COND=stats_update_enabled=true]
+    SYS_AS -> SYS_AS : update_usage_stats_best_effort(model_ref:ModelRef, usage:AgentUsageEvent) -> AgentUsageStats\n[step=S4.1]\n[vals stats_path=".aios/agents_database/<model_ref>/usage/stats.json"; policy="best_effort_rebuildable"]
+    note over SYS_AS
+      stats.json is derived/rebuildable; failure MUST NOT fail record_agent_usage.
+    end note
+  end
+end
+
+' ============================================================================
+' S5 — Return Ack
+' ============================================================================
+group S5 "Return success"
+  SYS_AS --> SYS_AR : [step=S5.1]\n[vals result.outcome=ok; result.ok.ack=true]
+  deactivate SYS_AS
+end
+
+@enduml

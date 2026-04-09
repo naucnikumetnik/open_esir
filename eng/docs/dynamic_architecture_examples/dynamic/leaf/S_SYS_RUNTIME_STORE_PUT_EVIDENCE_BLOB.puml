@@ -1,0 +1,159 @@
+@startuml
+title Persist execution evidence blob to AIOS managed storage
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "RuntimeStore" as SYS_RS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_RUNTIME_STORE_PUT_EVIDENCE_BLOB
+end note
+
+note over SYS_RS, SYS_Tools
+  RuntimeStore owns execution-evidence persistence semantics.
+  ToolsAdapter provides the physical access path to AIOS managed storage.
+  Core validates the derived evidence document before persistence.
+end note
+
+note over SYS_RS
+  This slice persists one run-scoped evidence record for one execution attempt.
+  Evidence index update is best-effort and MUST NOT fail the operation by default.
+end note
+
+group S1 "AgentRuntime requests evidence persistence"
+  SYS_AR -> SYS_RS : IF_SYS_RUNTIME_STORE.put_evidence_blob(ctx:CallContext, run_ref:str, task_id:str, batch_execution_unit_id:str, batch_attempt_ref:str, evidence:any) -> Result[EvidenceRef]\n[step=S1.1]\n[connection use_port=P_AR_USE_RUNTIME_STORE; prov_port=P_RS_PROV_RUNTIME_STORE; conn=C_AR__RS__RUNTIME_STORE]\n[vals run_ref=run_ref; task_id=task_id; batch_execution_unit_id=batch_execution_unit_id; batch_attempt_ref=batch_attempt_ref; evidence=<execution_evidence_pack>]
+  activate SYS_RS
+
+  alt [COND=run_ref is null or malformed or task_id is null or malformed or batch_execution_unit_id is null or malformed or batch_attempt_ref is null or malformed]
+    SYS_RS --> SYS_AR : [step=S1.2]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=EVIDENCE_REF_INVALID]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S2 "RuntimeStore validates evidence payload and allocates evidence record"
+  SYS_RS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S2.1]\n[connection use_port=P_RS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_RS__CORE__CORE_SERVICE]\n[vals items=[{item_id="execution_evidence"; kind=ARTIFACT; content_type="application/json"; payload_any=evidence}]]
+  ref over SYS_RS, SYS_Core
+    expand=S_SYS_CORE_VALIDATE
+    op=IF_SYS_CORE_SERVICE.validate
+    note="Validate derived execution evidence payload before persistence."
+  end ref
+  SYS_Core --> SYS_RS : [step=S2.1r]\n[vals result.outcome=(ok|err); result.ok.overall_status=(PASS|FAIL)]
+
+  alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+    SYS_RS --> SYS_AR : [step=S2.2]\n[vals result.outcome=err; result.err.category=VALIDATION; result.err.code=EVIDENCE_INVALID]
+    deactivate SYS_RS
+    stop
+  else [COND=EVIDENCE_VALID]
+    SYS_RS -> SYS_RS : allocate_evidence_record(run_ref, task_id, batch_execution_unit_id, batch_attempt_ref)\n[step=S2.3]\n[vals evidence_id=<ulid_or_uuid>; rel_path="evidence/<evidence_id>/payload.json"; meta_path="evidence/<evidence_id>/meta.json"]
+    SYS_RS -> SYS_RS : derive_evidence_meta(evidence, task_id, batch_execution_unit_id, batch_attempt_ref)\n[step=S2.4]\n[vals meta={content_type="application/json"; tags=["execution_evidence","task:"+task_id,"batch_unit:"+batch_execution_unit_id,"attempt:"+batch_attempt_ref]; created_at=<now>; producer=ctx.caller; run_ref=run_ref}]
+    SYS_RS -> SYS_RS : serialize_evidence_payload(evidence)\n[step=S2.5]\n[vals payload_json="<execution_evidence_json>"]
+    SYS_RS -> SYS_RS : serialize_evidence_meta(meta)\n[step=S2.6]\n[vals meta_json="<evidence_meta_json>"]
+  end
+end
+
+group S3 "RuntimeStore ensures evidence directory exists"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.ensure_dir(ctx:CallContext, path:str) -> Result[WriteResult]\n[step=S3.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/evidence/<evidence_id>"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_ENSURE_DIR
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S3.1r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    SYS_RS --> SYS_AR : [step=S3.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=EVIDENCE_WRITE_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S4 "RuntimeStore writes evidence payload + metadata"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S4.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/<rel_path>"; text="<execution_evidence_json>"; expected_etag=null; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S4.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_RS --> SYS_AR : [step=S4.2]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=EVIDENCE_WRITE_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S4.3]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/<meta_path>"; text="<evidence_meta_json>"; expected_etag=null; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S4.3r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    note over SYS_RS
+      Payload may already have been written while metadata write failed.
+      Persistence is treated as failed to caller and repaired later by
+      idempotent evidence repair/index rebuild logic.
+    end note
+    SYS_RS --> SYS_AR : [step=S4.4]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=EVIDENCE_META_WRITE_FAILED]
+    deactivate SYS_RS
+    stop
+  end
+end
+
+group S5 "RuntimeStore updates run-scoped evidence index (best-effort)"
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S5.1]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/evidence/index.json"; opts.encoding="utf-8"]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S5.1r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    SYS_RS -> SYS_RS : evidence_index=derive_empty_evidence_index(run_ref)\n[step=S5.2]
+  else [COND=INDEX_READ_OK]
+    SYS_RS -> SYS_RS : evidence_index=parse_evidence_index_or_empty("<evidence_index_json>")\n[step=S5.3]
+  end
+
+  SYS_RS -> SYS_RS : merge_evidence_index_record(evidence_index, evidence_id, rel_path, meta_path, meta)\n[step=S5.4]\n[vals updated_index=<EvidenceIndex>]
+  SYS_RS -> SYS_RS : serialize_evidence_index(updated_index)\n[step=S5.5]\n[vals evidence_index_json="<updated_evidence_index_json>"]
+
+  SYS_RS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.write_text(ctx:CallContext, path:str, text:str, expected_etag?:str, opts?:FSWriteOptions) -> Result[WriteResult]\n[step=S5.6]\n[connection use_port=P_RS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_RS__TOOLS__TOOL_BUS]\n[vals path=".aios/runtime/runs/<run_ref>/evidence/index.json"; text="<updated_evidence_index_json>"; expected_etag=null; opts.atomic=true]
+  ref over SYS_RS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_WRITE_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_RS : [step=S5.6r]\n[vals result.outcome=(ok|err)]
+
+  alt [COND=result.outcome=err]
+    note over SYS_RS
+      Default policy: BEST_EFFORT.
+      Evidence index update failure MUST NOT fail put_evidence_blob.
+      Later slices may add strict mode if needed.
+    end note
+  else [COND=INDEX_UPDATE_OK]
+  end
+end
+
+group S6 "RuntimeStore returns EvidenceRef"
+  SYS_RS --> SYS_AR : [step=S6.1]\n[vals result.outcome=ok; result.ok.evidence_id=<evidence_id>; result.ok.path=".aios/runtime/runs/<run_ref>/<rel_path>"; result.ok.content_type="application/json"; result.ok.tags=["execution_evidence","task:"+task_id,"batch_unit:"+batch_execution_unit_id,"attempt:"+batch_attempt_ref]]
+  deactivate SYS_RS
+end
+
+@enduml

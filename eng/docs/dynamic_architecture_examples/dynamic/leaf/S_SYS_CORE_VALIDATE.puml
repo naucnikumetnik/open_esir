@@ -1,0 +1,43 @@
+@startuml
+title Validate 1..N items through Core policy and framework rules
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(any allowed component)" as SYS_CALLER
+
+box "AIOS — System Components" #F3F3F3
+  control "Core" as SYS_Core <<component>>
+end box
+
+note over SYS_CALLER, SYS_Core #FFF8DC
+S_SYS_CORE_VALIDATE
+end note
+
+note over SYS_Core
+  Core owns validation semantics and rule application.
+  Internal framework lookup, pinned rule-context loading, and optional AISL helper
+  tooling remain collapsed in this black-box service leaf.
+  This operation validates already-provided inputs only; it does not read target-project artifacts.
+end note
+
+group S1 "Caller requests validation"
+  SYS_CALLER -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S1.1]\n[connection use_port=P_CALLER_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_CALLER__CORE__CORE_SERVICE]\n[vals items.count=len(items); fw=fw]
+  activate SYS_Core
+
+  alt [COND=VALIDATION_SYSTEM_ERROR]
+    SYS_Core --> SYS_CALLER : [step=S1.1err]\n[vals result.outcome=err; result.err.category=INTERNAL; result.err.code=VALIDATION_SYSTEM_ERROR]
+    deactivate SYS_Core
+  else [COND=VALIDATION_COMPLETED]
+    SYS_Core --> SYS_CALLER : [step=S1.1r]\n[vals result.outcome=ok; result.ok.overall_status=(PASS|FAIL); result.ok.by_item.size=len(items)]
+    deactivate SYS_Core
+  end
+end
+
+@enduml

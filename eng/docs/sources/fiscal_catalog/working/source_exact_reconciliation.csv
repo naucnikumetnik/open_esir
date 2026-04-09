@@ -1,0 +1,57 @@
+SourceExactName,CurrentCanonicalName,ArtifactKind,CatalogLayer,ReconciliationStatus,CorpusSource,SourceEvidence,Notes
+CreateInvoice,CreateInvoice,contract,core_canonical,ok,KB-006,POS to SDC Protocol CreateInvoice service sections,Exact core contract already present in the canonical set
+GetStatus,GetStatus,contract,core_canonical,ok,KB-006,POS to SDC Protocol GetStatus service sections,Exact core contract already present in the canonical set
+GetEnvironmentParameters,GetEnvironmentParameters,contract,core_canonical,ok,KB-006,POS to SDC Protocol GetEnvironmentParameters service sections,Exact core contract already present in the canonical set
+VerifyPin,VerifyPin,contract,core_canonical,ok,KB-006,POS to SDC Protocol VerifyPin service sections,Exact core contract already present in the canonical set
+Attention,Attention,contract,core_canonical,ok,KB-006,POS to SDC Protocol Attention service section,Exact core contract already present in the canonical set
+GetLastSignedInvoiceHttp,GetLastSignedInvoiceHttp,contract,core_canonical,ok,KB-006,GetLastSignedInvoice recovery section,Exact recovery contract already present in the canonical set
+Select SE Applet,SelectSEApplet,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Get Secure Element Version,GetSecureElementVersion,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Forward Secure Element Directive,ForwardSecureElementDirective,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Get Cert Params,GetCertParams,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Sign Invoice APDU,SignInvoiceApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Amount Status APDU,AmountStatusApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Get Last Signed Invoice APDU,GetLastSignedInvoiceApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Export Certificate APDU,ExportCertificateApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:2334-2490 and audit APDU sections,Reasonable canonicalization of the published command name
+Export Audit Data APDU,ExportAuditDataApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Audit APDU sections in Technical Documentation,Reasonable canonicalization of the published command name
+End Audit APDU,EndAuditApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Audit APDU sections in Technical Documentation,Reasonable canonicalization of the published command name
+Get PIN Tries Left From SE Applet,GetPinTriesLeftFromSEApplet,apdu_contract,core_canonical,ok_canonicalized,KB-006,Secure Element APDU command sections,Reasonable canonicalization of the published command name
+Export TaxCore Public Key APDU,ExportTaxCorePublicKeyApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Audit APDU sections in Technical Documentation,Reasonable canonicalization of the published command name
+Start Audit APDU,StartAuditApdu,apdu_contract,core_canonical,ok_canonicalized,KB-006,Audit APDU sections in Technical Documentation,Reasonable canonicalization of the published command name
+Select PKI Applet,SelectPKIApplet,apdu_contract,core_canonical,ok_canonicalized,KB-006,PKI applet command section in Technical Documentation,Reasonable canonicalization of the published command name
+GetInvoiceVerificationJson,GetInvoiceVerificationJson,verification_contract,guidance_canonical,ok_guidance,KB-013,Applications guide JSON verification section,Good as guidance-only public verification surface
+InvoiceVerificationResponse,InvoiceVerificationResponse,verification_type,guidance_canonical,ok_guidance,KB-013,Applications guide JSON verification section,Good as guidance-only public verification surface
+VerifiedInvoiceRequestView,VerifiedInvoiceRequestView,verification_type,guidance_canonical,ok_guidance,KB-013,Applications guide JSON verification section,Good as guidance-only public verification surface
+VerifiedPaymentItem,VerifiedPaymentItem,verification_type,guidance_canonical,ok_guidance,KB-013,Applications guide JSON verification section,Good as guidance-only public verification surface
+VerifiedInvoiceResultView,VerifiedInvoiceResultView,verification_type,guidance_canonical,ok_guidance,KB-013,Applications guide JSON verification section,Good as guidance-only public verification surface
+LastSignedInvoiceRequest,LastSignedInvoiceRequest,type,derived_layer,ok_derived,KB-006,Get Last Signed Invoice APDU section,Good as a derived empty invocation marker rather than a hard protocol DTO
+ExportPkiCertificate,ExportPkiCertificate,contract,reference_only,ok_reference,REF-005; REF-006,Reference smart-card reader and certificate library,Good as a reference-only helper surface
+CertificateMetadata,CertificateMetadata,type,reference_only,ok_reference,REF-006,Reference certificate library helper model,Good as a reference-only helper surface
+CertificateType,CertificateType,enum_family,reference_only,ok_reference,REF-006,Reference certificate library helper enum family,Good as a reference-only helper surface
+LPFR_TRANSPORT,LPFR_TRANSPORT,error_family,reference_only,ok_reference,KB-007,Manual-test transport behavior,Good as a reference-only transport family
+SMART_CARD_STATUS,SMART_CARD_STATUS,error_family,reference_only,ok_reference,REF-005,Reference PKI smart-card status handling,Good as a reference-only smart-card status family
+GetStatusResponse,StatusResponse,type,core_canonical,questionable_rename,KB-006,Technical-Documentation.txt:2825-2833,Canonical rename is acceptable but the source-exact published name is different
+ModelErrors,ValidationErrorResponse,type,core_canonical,questionable_rename,KB-006,Technical-Documentation.txt:5396-5399,Canonical rename is acceptable but the source-exact published name is different
+ModelError,ValidationErrorItem,type,core_canonical,questionable_rename,KB-006,Technical-Documentation.txt:5401-5403,Canonical rename is acceptable but the source-exact published name is different
+Payment,PaymentItem,type,core_canonical,questionable_rename,KB-006,Technical-Documentation.txt:3755,Canonical rename is acceptable but the source-exact published name is different
+Item,InvoiceItem,type,core_canonical,questionable_rename,KB-006,Technical-Documentation.txt:3760,Canonical rename is acceptable but the source-exact published name is different
+inline_model(options),InvoiceOptions,type,core_canonical,questionable_rename,KB-006,Technical-Documentation.txt:3759,Useful wrapper name but not a source-exact published DTO name
+auditRequestPayload (Start Audit output),AuditRequestPayload,type,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:6399-6412; 9991-10047,Canonical primitive for the opaque Start Audit APDU output; distinct from the published HTTP ProofOfAuditRequest wrapper
+Configuration,Configuration,contract,core_canonical,ok,KB-006,Technical-Documentation.txt:1864-1880,Published shared TaxCore.API service is now normalized as a distinct contract
+Tax Rates,TaxRates,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:1869-1871; 1988 and following,Published shared TaxCore.API service is now normalized as a distinct contract with a compact canonical name
+Environments,Environments,contract,core_canonical,ok,KB-006,Technical-Documentation.txt:1873-1875; 2264 and following,Published shared TaxCore.API service is now normalized as a distinct contract
+Encryption Certificate,EncryptionCertificate,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:1877-1878; 2334 and following,Published shared TaxCore.API service is now normalized as a distinct contract with a compact canonical name
+Request Authentication Token,RequestAuthenticationToken,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8254-8368,Published E-SDC TaxCore.API contract is now normalized as a distinct contract with a compact canonical name
+Get Initialization Commands,GetInitializationCommands,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8378-8460,Published E-SDC TaxCore.API contract is now normalized as a distinct contract with a compact canonical name
+Notify Online Status,NotifyOnlineStatus,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8462-8525,Published E-SDC TaxCore.API contract is now normalized as a distinct contract with a compact canonical name
+Notify Command Processed,NotifyCommandProcessed,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8527-8595,Published E-SDC TaxCore.API contract is now normalized as a distinct contract with a compact canonical name
+Submit Audit Package,SubmitAuditPackage,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8597-8687,Published E-SDC TaxCore.API contract is now normalized as a distinct contract with a compact canonical name
+Submit Audit Request Payload ARP,SubmitAuditRequestPayload,contract,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8762-8860,Published E-SDC TaxCore.API contract is now normalized as a distinct contract with a compact canonical name
+Command,Command,type,core_canonical,ok,KB-006,Technical-Documentation.txt:6479-6487,Published E-SDC model is now normalized separately instead of staying implicit
+CommandsType,CommandsType,enum_family,core_canonical,ok,KB-006,Technical-Documentation.txt:6489-6500,Published E-SDC enum family is now normalized separately
+AuditPackage,AuditPackage,type,core_canonical,ok,KB-006,Technical-Documentation.txt:6432-6450,Published E-SDC audit model is now normalized separately
+AuditDataStatus,AuditDataStatus,type,core_canonical,ok,KB-006,Technical-Documentation.txt:8693-8760,Published E-SDC audit-status model is now normalized separately
+ProofOfAuditRequest,ProofOfAuditRequest,type,core_canonical,ok,KB-006,Technical-Documentation.txt:6399-6412; 8852-8860,Published E-SDC audit-proof request model is now normalized separately from the opaque Start Audit APDU output
+Array[EnvironmentDescriptor],EnvironmentDescriptorList,type,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:2264-2316,Canonical wrapper type closes the top-level shared Environments array output without losing the source-published element model
+Array[Command],CommandList,type,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8378-8525; 8693-8760,Canonical wrapper type closes the top-level command-array outputs returned by E-SDC backend services
+true|false request body,TaxCoreBooleanFlagBody,type,core_canonical,ok_canonicalized,KB-006,Technical-Documentation.txt:8462-8595,Canonical transport primitive keeps the tiny backend boolean request body explicit without promoting it into the stable domain

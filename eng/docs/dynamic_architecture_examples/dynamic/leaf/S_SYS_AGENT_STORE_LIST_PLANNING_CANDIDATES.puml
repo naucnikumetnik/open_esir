@@ -1,0 +1,186 @@
+@startuml
+title List planning candidates from AIOS managed storage
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(AgentRuntime)" as SYS_AR
+
+box "AIOS — System Components" #F3F3F3
+  control "AgentStore" as SYS_AS <<component>>
+  control "Core" as SYS_Core <<component>>
+  control "ToolsAdapter\n(MCP client / ToolBus)" as SYS_Tools <<component>>
+end box
+
+box "External Environment" #EEF5FF
+  database "AIOS Managed Storage\n(.aios)" as EXT_AIOS <<external>>
+end box
+
+note over SYS_AR, EXT_AIOS #FFF8DC
+S_SYS_AGENT_STORE_LIST_PLANNING_CANDIDATES
+ap_ref = AP_LIST_PLANNING_CANDIDATES
+end note
+
+note over SYS_AS, SYS_Tools
+  AgentStore owns planning-candidate semantics and error classification.
+  ToolsAdapter provides the physical access path to AIOS managed storage.
+end note
+
+' ============================================================================
+' S1 — Request
+' ============================================================================
+group S1 "AgentRuntime requests planning candidates"
+  SYS_AR -> SYS_AS : IF_SYS_AGENT_STORE.list_planning_candidates(ctx:CallContext, intent:PreparedExecutionIntent) -> Result[PlanningCandidateSet]\n[step=S1.1]\n[connection use_port=P_AR_USE_AGENT_STORE; prov_port=P_AS_PROV_AGENT_STORE; conn=C_AR__AS__AGENT_STORE]\n[vals intent.execution_kind=intent.execution_kind; intent.review_policy=intent.review_policy; intent.source_artifact_kind=intent.source_artifact_kind; intent.realization_mode=intent.realization_mode; intent.user_prefs=intent.user_prefs]
+  activate SYS_AS
+end
+
+' ============================================================================
+' S2 — Load + validate inventory (agents_config.json)
+' ============================================================================
+group S2 "AgentStore loads + validates agent inventory"
+  SYS_AS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S2.1]\n[connection use_port=P_AS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AS__TOOLS__TOOL_BUS]\n[vals path=".aios/agents_database/agents_config.json"; opts.encoding="utf-8"]
+  ref over SYS_AS, SYS_Tools, EXT_AIOS
+    expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+    ref_mode=call_return
+  end ref
+  SYS_Tools --> SYS_AS : [step=S2.1r]\n[vals result.outcome=(ok|err); result.err.code=<fs_error_if_any>]
+
+  alt [COND=result.outcome=err]
+    SYS_AS -> SYS_AS : classify_inventory_read_error(result.err)\n[step=S2.2]\n[vals mapped_code=AGENT_INVENTORY_UNAVAILABLE]
+    SYS_AS --> SYS_AR : [step=S2.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_INVENTORY_UNAVAILABLE]
+    deactivate SYS_AS
+
+  else [COND=result.outcome=ok]
+    SYS_AS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx:CallContext, items:[ValidationItem], fw:FrameworkHandle) -> Result[ValidationBatchResult]\n[step=S2.4]\n[connection use_port=P_AS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AS__CORE__CORE_SERVICE]\n[vals items=[{item_id="agents_config"; kind=AGENT_INVENTORY; content_type="application/json"; payload_text="<agents_config_json>"}]]
+    ref over SYS_AS, SYS_Core
+      expand=S_SYS_CORE_VALIDATE
+      op=IF_SYS_CORE_SERVICE.validate
+      note="Type/shape validation for agents_config.json"
+    end ref
+    SYS_Core --> SYS_AS : [step=S2.4r]\n[vals result.outcome=(ok|err)]
+
+    alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+      SYS_AS --> SYS_AR : [step=S2.5]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_INVENTORY_UNAVAILABLE]
+      deactivate SYS_AS
+
+    else [COND=VALID_INVENTORY]
+      SYS_AS -> SYS_AS : parse_agents_config("<agents_config_json>") -> AgentInventory\n[step=S2.6]\n[vals model_refs:Sequence[ModelRef]=<list>; agents:Sequence[AgentEntry]=<list>]
+    end
+  end
+end
+
+' ============================================================================
+' S3 — Load + validate per-model metadata (model_card + access) and check local blob when required
+' ============================================================================
+group S3 "AgentStore loads + validates model metadata (per model_ref)"
+  loop [COND=for each model_ref in model_refs]
+    ' 1) model_card.yaml (required)
+    SYS_AS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S3.1]\n[connection use_port=P_AS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AS__TOOLS__TOOL_BUS]\n[vals path=".aios/agents_database/<model_ref>/model_card.yaml"; opts.encoding="utf-8"]
+    ref over SYS_AS, SYS_Tools, EXT_AIOS
+      expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+      ref_mode=call_return
+    end ref
+    SYS_Tools --> SYS_AS : [step=S3.1r]\n[vals result.outcome=(ok|err)]
+
+    alt [COND=result.outcome=err]
+      SYS_AS -> SYS_AS : classify_model_meta_read_error(result.err)\n[step=S3.2]\n[vals mapped_code=AGENT_MODEL_META_UNAVAILABLE; model_ref=model_ref]
+      SYS_AS --> SYS_AR : [step=S3.3]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_MODEL_META_UNAVAILABLE; result.err.data.model_ref=model_ref]
+      deactivate SYS_AS
+      break
+
+    else [COND=model_card_read_ok]
+      SYS_AS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx, items, fw) -> Result[ValidationBatchResult]\n[step=S3.4]\n[connection use_port=P_AS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AS__CORE__CORE_SERVICE]\n[vals items=[{item_id="model_card"; kind=MODEL_CARD; content_type="application/yaml"; payload_text="<model_card_yaml>"}]]
+      ref over SYS_AS, SYS_Core
+        expand=S_SYS_CORE_VALIDATE
+        op=IF_SYS_CORE_SERVICE.validate
+        note="Type/shape validation for model_card.yaml"
+      end ref
+      SYS_Core --> SYS_AS : [step=S3.4r]\n[vals result.outcome=(ok|err)]
+
+      alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+        SYS_AS --> SYS_AR : [step=S3.5]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_MODEL_META_UNAVAILABLE; result.err.data.model_ref=model_ref]
+        deactivate SYS_AS
+        break
+      else [COND=model_card_valid]
+    SYS_AS -> SYS_AS : parse_model_card("<model_card_yaml>") -> ModelCard\n[step=S3.6]\n[vals model_capabilities=<obj>]
+      end
+    end
+
+    ' 2) access.json (required for non-local-only; optional for pure local_file if you choose)
+    SYS_AS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.read_text(ctx:CallContext, path:str, opts?:FSReadOptions) -> Result[ReadTextResult]\n[step=S3.7]\n[connection use_port=P_AS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AS__TOOLS__TOOL_BUS]\n[vals path=".aios/agents_database/<model_ref>/access.json"; opts.encoding="utf-8"]
+    ref over SYS_AS, SYS_Tools, EXT_AIOS
+      expand=S_SYS_TOOL_BUS_FS_READ_TEXT
+      ref_mode=call_return
+    end ref
+    SYS_Tools --> SYS_AS : [step=S3.7r]\n[vals result.outcome=(ok|err)]
+
+    alt [COND=result.outcome=err]
+      SYS_AS -> SYS_AS : decide_access_required(model_card)\n[step=S3.8]\n[vals access_required=(true|false)]
+      alt [COND=access_required=true]
+        SYS_AS --> SYS_AR : [step=S3.9]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_MODEL_META_UNAVAILABLE; result.err.data.model_ref=model_ref]
+        deactivate SYS_AS
+        break
+      else [COND=access_optional]
+        SYS_AS -> SYS_AS : use_default_local_access(model_card)\n[step=S3.10]
+      end
+
+    else [COND=access_read_ok]
+      SYS_AS -> SYS_Core : IF_SYS_CORE_SERVICE.validate(ctx, items, fw) -> Result[ValidationBatchResult]\n[step=S3.11]\n[connection use_port=P_AS_USE_CORE_SERVICE; prov_port=P_CORE_PROV_CORE_SERVICE; conn=C_AS__CORE__CORE_SERVICE]\n[vals items=[{item_id="access"; kind=MODEL_ACCESS; content_type="application/json"; payload_text="<access_json>"}]]
+      ref over SYS_AS, SYS_Core
+        expand=S_SYS_CORE_VALIDATE
+        op=IF_SYS_CORE_SERVICE.validate
+        note="Type/shape validation for access.json"
+      end ref
+      SYS_Core --> SYS_AS : [step=S3.11r]\n[vals result.outcome=(ok|err)]
+
+      alt [COND=result.outcome=err or result.ok.overall_status=FAIL]
+        SYS_AS --> SYS_AR : [step=S3.12]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_MODEL_META_UNAVAILABLE; result.err.data.model_ref=model_ref]
+        deactivate SYS_AS
+        break
+      else [COND=access_valid]
+        SYS_AS -> SYS_AS : parse_model_access("<access_json>") -> ModelAccess\n[step=S3.13]\n[vals access_mode=<local_file|local_endpoint|cloud_api|mcp>]
+      end
+    end
+
+    ' 3) local file presence check when required
+    alt [COND=access_mode=local_file]
+      SYS_AS -> SYS_Tools : IF_SYS_TOOL_BUS.fs.stat(ctx:CallContext, path:str) -> Result[FSStatResult]\n[step=S3.14]\n[connection use_port=P_AS_USE_TOOL_BUS; prov_port=P_TOOLS_PROV_TOOL_BUS; conn=C_AS__TOOLS__TOOL_BUS]\n[vals path=".aios/agents_database/<model_ref>/model.gguf"]
+      ref over SYS_AS, SYS_Tools, EXT_AIOS
+        expand=S_SYS_TOOL_BUS_FS_STAT
+        ref_mode=call_return
+      end ref
+      SYS_Tools --> SYS_AS : [step=S3.14r]\n[vals result.outcome=(ok|err)]
+
+      alt [COND=result.outcome=err]
+        SYS_AS --> SYS_AR : [step=S3.15]\n[vals result.outcome=err; result.err.category=DEPENDENCY; result.err.code=AGENT_MODEL_META_UNAVAILABLE; result.err.data.model_ref=model_ref; result.err.data.reason="LOCAL_MODEL_BLOB_MISSING"]
+        deactivate SYS_AS
+        break
+      end
+    end
+
+    SYS_AS -> SYS_AS : add_candidate_if_feasible(intent, model_card, access)\n[step=S3.16]\n[vals candidate_added=(true|false); reason_if_excluded=<opt>]
+  end
+end
+
+' ============================================================================
+' S4 — Derive feasible set (or none)
+' ============================================================================
+group S4 "AgentStore derives feasible planning candidate set"
+  SYS_AS -> SYS_AS : finalize_candidate_set()\n[step=S4.1]\n[vals count=<n>; selection_mode=<logical_or_ranked>]
+
+  alt [COND=count=0]
+    SYS_AS --> SYS_AR : [step=S4.2]\n[vals result.outcome=err; result.err.category=NOT_FOUND; result.err.code=NO_FEASIBLE_PLANNING_CANDIDATES]
+    deactivate SYS_AS
+  else [COND=count>0]
+    SYS_AS --> SYS_AR : [step=S4.3]\n[vals result.outcome=ok; result.ok.count=<n>; result.ok.selection_mode=<logical_or_ranked>; result.ok.candidates=<planning_candidate_set{agent=<agent_handle>; model_ref=<model_ref>; candidate_added=true}>]
+    deactivate SYS_AS
+  end
+end
+
+@enduml
