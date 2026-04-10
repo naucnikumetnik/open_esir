@@ -1,0 +1,137 @@
+@startuml
+title Local audit export — system master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Operator" as OP
+
+box "Open Fiscal Core — System Components" #F3F3F3
+  control  "E-SDC" as ESDC <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity   "SE\n(Security Element)" as SE <<external>>
+  storage  "Removable Media\n(SD Card / USB)" as MEDIA <<external>>
+end box
+
+note over OP, MEDIA #FFF8DC
+S_SYS_LOCAL_AUDIT_EXPORT
+[semantics lifecycle_spine=true]
+end note
+
+note over ESDC, MEDIA
+  Local audit is file-based.
+  Inserting removable media triggers the flow.
+  Commands on media root are processed before audit export.
+end note
+
+group S1 "Insert removable media and detect local-audit trigger"
+  OP -> MEDIA : insert removable media\n[step=S1.1]
+  ESDC -> ESDC : detect media insertion\n[step=S1.2]
+  ESDC -> ESDC : validate supported filesystem and mount access\n[step=S1.3]
+end
+
+alt [COND=unsupported_media_or_filesystem]
+
+  group S1a "Reject invalid media"
+    ESDC -> ESDC : mark export blocked by invalid media\n[step=S1a.1]
+    ESDC --> OP : [step=S1a.2]\n[vals result=LocalAuditExportResult(media_invalid)]
+  end
+
+else [COND=media_ready]
+
+  group S2 "Inspect media root for command file"
+    ESDC -> MEDIA : inspect root for {UID}.commands\n[step=S2.1]
+  end
+
+  alt [COND=commands_present]
+
+    group S3 "Execute commands from media before audit export"
+      ESDC -> ESDC : parse command file and filter commands for active SE UID\n[step=S3.1]
+
+      loop [for each command]
+        ESDC -> ESDC : apply command payload\n[step=S3.2]
+      end
+
+      ESDC -> MEDIA : write {UID}.results\n[step=S3.3]
+      note over ESDC, MEDIA
+        Commands Execution Results are written back to media
+        after processing the media-delivered commands.
+      end note
+    end
+
+  else [COND=no_commands_present]
+
+    group S3a "Continue without media-delivered commands"
+      ESDC -> ESDC : continue directly to local audit export\n[step=S3a.1]
+    end
+
+  end
+
+  group S4 "Determine local audit export set"
+    ESDC -> ESDC : enumerate pending local AuditPackage backlog\n[step=S4.1]
+    ESDC -> ESDC : group backlog by active Secure Element UID\n[step=S4.2]
+    ESDC -> ESDC : filter packages by current target environment\n[step=S4.3]
+  end
+
+  alt [COND=no_pending_audit_packages]
+
+    group S4a "No pending local audit packages"
+      ESDC -> ESDC : keep local audit state unchanged\n[step=S4a.1]
+    end
+
+  else [COND=pending_audit_packages_present]
+
+    group S5 "Prepare removable-media folder structure"
+      ESDC -> MEDIA : ensure {UID}/ folder exists\n[step=S5.1]
+    end
+
+    group S6 "Export audit packages to removable media"
+      loop [for each pending audit package]
+        ESDC -> MEDIA : write {UID}/{UID}-{UID}-{Ordinal_Number}.json\n[step=S6.1]\n[vals artifact=AuditPackage]
+      end
+    end
+
+    alt [COND=arp_available_or_generated_for_local_audit]
+
+      group S7 "Export ARP file"
+        ESDC -> SE : IF_DEP_SECURE_ELEMENT.StartAuditApdu() -> AuditRequestPayload\n[step=S7.1]
+        activate SE
+        SE --> ESDC : [step=S7.1r]\n[vals result=AuditRequestPayload]
+        deactivate SE
+
+        ESDC -> MEDIA : write {UID}/{UID}.arp\n[step=S7.2]\n[vals artifact=AuditRequestPayload]
+      end
+
+    else [COND=no_arp_available]
+
+      group S7a "Skip ARP export"
+        ESDC -> ESDC : continue without ARP file\n[step=S7a.1]
+      end
+
+    end
+
+  end
+
+  group S8 "Close local export outcome"
+    ESDC -> ESDC : keep exported audit packages in local non-volatile memory\n[step=S8.1]
+    ESDC -> ESDC : mark local audit export outcome\n[step=S8.2]
+    ESDC --> OP : [step=S8.3]\n[vals result=LocalAuditExportResult(export_completed | commands_processed_and_export_completed | no_pending_packages | environment_mismatch | export_partial)]
+  end
+
+end
+
+note over ESDC, SE
+  Exporting audit packages to removable media does not by itself
+  clear the local audit backlog.
+  Audit packages remain stored locally until Proof-of-Audit is obtained.
+end note
+
+@enduml

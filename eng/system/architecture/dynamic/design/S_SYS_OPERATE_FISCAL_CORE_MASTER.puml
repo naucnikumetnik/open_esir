@@ -23,6 +23,7 @@ box "External Dependencies" #EEF5FF
   entity   "PKI Applet /\nClient Certificate" as PKI <<external>>
   control  "TaxCore.API Shared" as TCS <<external>>
   control  "TaxCore Backend\n(E-SDC API)" as TCB <<external>>
+  storage  "Removable Media\n(SD Card / USB)" as MEDIA <<external>>
   boundary "Public Verification" as PV <<external>>
 end box
 
@@ -68,7 +69,13 @@ group S5 "Maintain audit and proof lifecycle"
   end ref
 end
 
-group S6 "Expose public verification"
+group S6 "Perform local audit export"
+  ref over ACT, ESDC, SE, MEDIA
+    S_SYS_LOCAL_AUDIT_EXPORT
+  end ref
+end
+
+group S7 "Expose public verification"
   ref over ACT, ESIR, PV
     S_SYS_PUBLIC_VERIFICATION
   end ref
@@ -78,7 +85,8 @@ note over ESIR, ESDC
   ESIR owns business-facing orchestration.
   E-SDC owns secure-element interaction,
   backend synchronization, audit transfer,
-  and proof-of-audit completion.
+  proof-of-audit completion,
+  and local audit export handling.
 end note
 
 note over TCS, TCB
