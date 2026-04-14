@@ -1,0 +1,1550 @@
+artifact_kind: structural_view
+schema_version: '0.2'
+card:
+  id: SV_SYS_OPEN_FISCAL_CORE
+  name: Open Fiscal Core — system structural view
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-structural
+  level: system
+  scope: Sistemska strukturna dekompozicija Open Fiscal Core-a, njegovih glavnih internih komponenti, spoljnih zavisnosti, sistemskih portova i logičkih konektora.
+  purpose: Da definiše stabilne sistemske granice, odgovornosti ESIR i E-SDC dela, i logičke veze prema poslovnoj aplikaciji, TaxCore servisima, Security Element-u, PKI kontekstu, javnoj verifikaciji i lokalnom audit izvozu.
+traceability:
+  related_stakeholder_refs: []
+  related_concern_refs: []
+  related_constraint_refs: []
+  related_requirement_refs: []
+  related_dynamic_view_refs:
+  - S_SYS_OPERATE_FISCAL_CORE_MASTER
+  - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+  - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+  - S_SYS_FISCALIZE_INVOICE
+  - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+  - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+  - S_SYS_LOCAL_AUDIT_EXPORT
+  - S_SYS_PUBLIC_VERIFICATION
+interfaces:
+- id: IF_SYS_ESIR_SERVICE
+  name: ESIR Service
+  kind: system_internal_facade
+  boundary: internal
+  purpose: Poslovno-orijentisana ulazna sistemska fasada Open Fiscal Core-a prema business aplikaciji i operatoru.
+  key_operations:
+  - Bootstrap() -> BootstrapResult
+  - CheckReady() -> ReadinessResult
+  - VerifyPin(pin:PinPlainText) -> GeneralStatusCodeText
+  - Fiscalize(request:InvoiceRequest) -> InvoiceResult
+- id: IF_SYS_ESDC_SERVICE
+  name: E-SDC Service
+  kind: system_internal_service
+  boundary: internal
+  purpose: Sistemski interfejs kojim ESIR koristi E-SDC capabilities za lokalnu fiskalizaciju, spremnost i osvežavanje okruženja.
+  key_operations:
+  - BootstrapOrRefresh() -> BootstrapResult
+  - CheckReady() -> ReadinessResult
+  - Attention()
+  - GetStatus() -> StatusResponse
+  - VerifyPin(pin:PinPlainText) -> GeneralStatusCodeText
+  - GetEnvironmentParameters() -> EnvironmentParametersResponse
+  - CreateInvoice(request:InvoiceRequest) -> InvoiceResult
+- id: IF_DEP_TAXCORE_VSDC
+  name: TaxCore V-SDC
+  kind: external_dependency
+  boundary: external
+  purpose: Spoljni V-SDC interfejs za online fiskalizaciju računa.
+  key_operations:
+  - CreateInvoice(request:InvoiceRequest) -> InvoiceResult
+- id: IF_DEP_TAXCORE_SHARED
+  name: TaxCore Shared
+  kind: external_dependency
+  boundary: external
+  purpose: Spoljni shared TaxCore interfejs za bootstrap podatke i zajedničku konfiguraciju.
+  key_operations:
+  - Environments() -> EnvironmentDescriptor[]
+  - Configuration() -> TaxCoreConfigurationResponse
+  - TaxRates() -> TaxRatesResponse
+  - EncryptionCertificate() -> EncryptionCertificateBase64
+- id: IF_DEP_TAXCORE_ESDC_BACKEND
+  name: TaxCore E-SDC Backend
+  kind: external_dependency
+  boundary: external
+  purpose: Spoljni backend interfejs za autentikaciju, komande, audit i proof lifecycle.
+  key_operations:
+  - RequestAuthenticationToken() -> AuthenticationTokenResponse
+  - NotifyOnlineStatus(body:BooleanFlagBody) -> Command[]
+  - GetInitializationCommands() -> Command[]
+  - NotifyCommandProcessed(commandId:string, body:BooleanFlagBody)
+  - SubmitAuditPackage(data:AuditPackage) -> AuditDataStatus
+  - SubmitAuditRequestPayload(data:ProofOfAuditRequest)
+- id: IF_DEP_SECURE_ELEMENT
+  name: Secure Element
+  kind: external_dependency
+  boundary: external
+  purpose: Spoljni secure-element interfejs za APDU operacije nad fiskalnim tokenom i audit ciklusom.
+  key_operations:
+  - SignInvoiceApdu(request:SignInvoiceApduRequest) -> SignInvoiceApduResponse
+  - StartAuditApdu() -> AuditRequestPayload
+  - AmountStatusApdu() -> AmountStatusResponse
+  - EndAuditApdu(proof:ProofOfAudit)
+- id: IF_DEP_PKI_CLIENT_CONTEXT
+  name: PKI Client Context
+  kind: external_dependency
+  boundary: external
+  purpose: Spoljni PKI/certificate kontekst koji E-SDC koristi za backend autentikaciju i TLS identitet.
+  key_operations:
+  - ReadClientCertificateContext() -> ClientCertificateContext
+- id: IF_DEP_REMOVABLE_MEDIA_IO
+  name: Removable Media I/O
+  kind: external_dependency
+  boundary: external
+  purpose: Fajl-bazirani interfejs za lokalni audit export i media-delivered commands.
+  key_operations:
+  - InspectRoot() -> MediaRootInspection
+  - ReadCommandsFile(uid:string) -> MediaCommandFile
+  - WriteCommandResults(uid:string)
+  - EnsureAuditFolder(uid:string)
+  - WriteAuditPackage(uid:string, ordinal:number, pkg:AuditPackage)
+  - WriteAuditRequestPayload(uid:string, arp:AuditRequestPayload)
+- id: IF_DEP_PUBLIC_VERIFICATION
+  name: Public Verification
+  kind: external_dependency
+  boundary: external
+  purpose: Javni verifikacioni interfejs koji koristi spoljni verifier prema državnom/public verification sistemu; Open Fiscal Core samo emituje verification reference kroz fiskalni izlaz.
+  key_operations:
+  - GetInvoiceVerificationJson(verificationUrl:VerificationUrl) -> InvoiceVerificationResponse
+components:
+- id: C_OPEN_FISCAL_CORE
+  name: Open Fiscal Core
+  kind: component
+  purpose: Sistem od interesa koji objedinjuje ESIR poslovnu fasadu i E-SDC lokalni fiskalni engine sa backend/audit lifecycle mogućnostima.
+  boundary: internal
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Na ovom nivou view-a prikazuju se samo sistemski delovi; components map služi kao most ka kasnijem component decomposition radu.
+      constraints:
+      - Ne uvoditi transport-specifične adaptere u ovaj view; to pripada deployment/bootstrap artefaktima.
+      - Ne rastavljati E-SDC i ESIR dublje od grubih candidate components dok se ne zaključe storage/deployment/state artefakti.
+      notes: Open Fiscal Core je logički sklop ESIR + E-SDC; candidate component ID-jevi koriste CC_* prefiks da se ne mešaju sa finalnim top-level C_* komponentama.
+    components:
+    - component_id: CC_SYS_ESIR
+      name: ESIR
+      kind: service
+      responsibility: Business-facing fasada sistema i orkestracija poslovnih tokova.
+      boundary: internal
+      consumes:
+        ports: []
+        internal_channels: []
+      provides:
+        ports:
+        - port_ref: P_ESIR_PROV_ESIR_SERVICE
+        internal_channels: []
+      depends_on_component_ids:
+      - CC_SYS_ESDC
+      cdd_ref: ''
+      statefulness: run_scoped
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - request_id
+          - invoice_number
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_OPERATE_FISCAL_CORE_MASTER
+        - S_SYS_FISCALIZE_INVOICE
+        - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+      cm_binding_ref: ''
+    - component_id: CC_SYS_ESDC
+      name: E-SDC
+      kind: service
+      responsibility: Lokalni fiskalni engine i owner secure/backend/audit lifecycle tokova.
+      boundary: internal
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+        - port_ref: P_ESDC_USE_TAXCORE_SHARED
+        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+        - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
+        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+        internal_channels: []
+      provides:
+        ports:
+        - port_ref: P_ESDC_PROV_ESDC_SERVICE
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: persistent
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - uid
+          - command_id
+          - audit_package_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_OPERATE_FISCAL_CORE_MASTER
+        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+        - S_SYS_LOCAL_AUDIT_EXPORT
+      cm_binding_ref: ''
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da pruži jedinstvenu poslovnu ulaznu tačku za bootstrap, readiness i fiscalization tokove.
+      - Da omogući lokalnu i online fiskalizaciju kroz stabilne sistemske interfejse.
+      - Da očuva audit/proof lifecycle i operator-recovery tokove kao deo istog sistema.
+      must_not:
+      - Ne sme vezivati logičku arhitekturu za jedan deployment oblik.
+      - Ne sme mešati business-facing orkestraciju i secure-element/backend ownership bez eksplicitne granice između ESIR i E-SDC.
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: ESIR za ulazne poslovne tokove; E-SDC za backend/audit tokove.
+      timeout_expectations: Timeout politika je deployment-specifična i ne zatvara se na ovom view nivou.
+    concurrency_model:
+      execution_model: other
+      reentrancy: restricted
+      isolation_scope: per_request
+      state_sharing_rules: Zajedničko persistent stanje je dozvoljeno samo iza E-SDC granice; ESIR ne poseduje backend/audit state ownership.
+    error_model:
+      emitted_errors: []
+      error_translation_rules:
+      - description: Spoljašnji dependency/status error-i prevode se u sistemske readiness/fiscalization ishode preko ESIR ili E-SDC fasada.
+      failure_modes:
+      - id: FM_SYS_BOUNDARY_DRIFT
+        description: Granica između ESIR i E-SDC se razvodni i ownership postane nejasan.
+        mitigation_expectation: Zadržati jedinstvenu sistemsku fasadu i eksplicitne IF_SYS / IF_DEP veze.
+    configuration_surface:
+      parameters: []
+      environment_dependencies:
+      - id: ENV_DEPLOYMENT_VARIANT
+        description: Isti sistem mora biti sklopiv kao embedded, local service ili hosted-access varijanta.
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements:
+      - Audit tragovi i dokazivost ne smeju zavisiti od poslovne aplikacije.
+      logging_requirements:
+        level: required
+        correlation_fields:
+        - request_id
+        - invoice_number
+        - uid
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports: []
+- id: C_ESIR
+  name: ESIR
+  kind: boundary
+  purpose: Business-facing sistemska fasada koja prima zahteve iz poslovne aplikacije/operator toka, validira i priprema InvoiceRequest, bira fiskalizacioni put i vraća poslovni rezultat.
+  boundary: internal
+  parent_component_id: C_OPEN_FISCAL_CORE
+  components_map:
+    policy:
+      intent: Prikazati samo grube candidate components koji prirodno izlaze iz sistemskih sekvenci.
+      constraints:
+      - Bez transport detalja.
+      - Bez preuranjenog spuštanja na persistence i APDU detalje.
+      notes: ESIR na ovom nivou ostaje tanka orkestraciona/business fasada sa minimalnom unutrašnjom dekompozicijom; candidate component ID-jevi su standardizovani kao CC_ESIR_*.
+    components:
+    - component_id: CC_ESIR_FACADE
+      name: ESIR Facade
+      kind: service
+      responsibility: Prima Bootstrap, CheckReady, VerifyPin i Fiscalize ulaze i vodi sistemski tok prema E-SDC ili V-SDC putu.
+      boundary: facade
+      consumes:
+        ports:
+        - port_ref: P_ESIR_USE_ESDC_SERVICE
+        - port_ref: P_ESIR_USE_TAXCORE_VSDC
+        internal_channels: []
+      provides:
+        ports:
+        - port_ref: P_ESIR_PROV_ESIR_SERVICE
+        internal_channels: []
+      depends_on_component_ids:
+      - CC_ESIR_INVOICE_REQUEST_VALIDATION
+      - CC_ESIR_FISCALIZATION_ROUTE_SELECTOR
+      cdd_ref: ''
+      statefulness: run_scoped
+      concurrency: unknown
+      failure_modes:
+      - id: FM_ESIR_FACADE_ROUTE_MISMATCH
+        description: Pogrešan izbor V-SDC / E-SDC puta za dati deployment ili runtime režim.
+        mitigation_expectation: Ruta mora biti vođena konfiguracijom i readiness stanjem, ne implicitnim heuristikama.
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - request_id
+          - invoice_number
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+        - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+        - S_SYS_FISCALIZE_INVOICE
+      cm_binding_ref: ''
+    - component_id: CC_ESIR_INVOICE_REQUEST_VALIDATION
+      name: Invoice Request Validation
+      kind: module
+      responsibility: Radi poslovnu validaciju i pripremu InvoiceRequest strukture pre delegiranja fiskalizacionom putu.
+      boundary: internal
+      consumes:
+        ports: []
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: stateless
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: minimal
+          correlation_fields:
+          - request_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_FISCALIZE_INVOICE
+      cm_binding_ref: ''
+    - component_id: CC_ESIR_FISCALIZATION_ROUTE_SELECTOR
+      name: Fiscalization Route Selector
+      kind: module
+      responsibility: Bira V-SDC ili E-SDC put na osnovu konfigurisanog režima, readiness konteksta i sistemske politike rutiranja.
+      boundary: internal
+      consumes:
+        ports: []
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: stateless
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: minimal
+          correlation_fields:
+          - request_id
+          - configured_sdc_mode
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_FISCALIZE_INVOICE
+      cm_binding_ref: ''
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da bude jedina business-facing provider granica sistema.
+      - Da validira i priprema ulazne poslovne zahteve pre delegiranja.
+      - Da orkestrira readiness/recovery tokove prema E-SDC-u.
+      must_not:
+      - Ne sme direktno posedovati secure-element logiku.
+      - Ne sme direktno posedovati backend sync, command ili audit lifecycle.
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Pozivalac za IF_SYS_ESIR_SERVICE ulaze; E-SDC/V-SDC za njihove domenske greške.
+      timeout_expectations: Ulazni pozivi moraju imati određiv timeout, ali konkretne vrednosti su deployment-specifične.
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: per_request
+      state_sharing_rules: ESIR nema ownership nad dugotrajnim fiskalnim/audit stanjem osim kratkotrajnog request konteksta.
+    error_model:
+      emitted_errors: []
+      error_translation_rules:
+      - description: Greške V-SDC/E-SDC puta prevode se u poslovno-orijentisane fiscalization/readiness ishode.
+      failure_modes:
+      - id: FM_ESIR_INVALID_REQUEST
+        description: Nevalidan ili nekonzistentan InvoiceRequest ulaz.
+        mitigation_expectation: Zaustaviti tok pre delegiranja i vratiti validacioni ishod.
+    configuration_surface:
+      parameters:
+      - name: configured_sdc_mode
+        type_ref: SdcMode
+        description: Konfigurisani fiskalizacioni put za runtime tok.
+        default_policy: dynamic
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements:
+      - Mora postojati korelacija između poslovnog zahteva i vraćenog InvoiceResult ishoda.
+      logging_requirements:
+        level: required
+        correlation_fields:
+        - request_id
+        - invoice_number
+        - configured_sdc_mode
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_ESIR_PROV_ESIR_SERVICE
+    name: P_ESIR_PROV_ESIR_SERVICE
+    type: internal
+    direction: in
+    role: provider
+    interface_ref: IF_SYS_ESIR_SERVICE
+    description: Provider port preko kog ESIR prima business-facing sistemske pozive od poslovne aplikacije i operatora.
+  - id: P_ESIR_USE_ESDC_SERVICE
+    name: P_ESIR_USE_ESDC_SERVICE
+    type: internal
+    direction: out
+    role: consumer
+    interface_ref: IF_SYS_ESDC_SERVICE
+    description: Consumer port preko kog ESIR koristi E-SDC capabilities za lokalnu fiskalizaciju i readiness tokove.
+  - id: P_ESIR_USE_TAXCORE_VSDC
+    name: P_ESIR_USE_TAXCORE_VSDC
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_TAXCORE_VSDC
+    description: Consumer port za online V-SDC CreateInvoice tok.
+- id: C_ESDC
+  name: E-SDC
+  kind: component
+  purpose: Lokalni fiskalni engine koji poseduje secure-element interakciju, backend authentication/sync, command lifecycle, audit/proof lifecycle i local audit export.
+  boundary: internal
+  parent_component_id: C_OPEN_FISCAL_CORE
+  components_map:
+    policy:
+      intent: Prikazati glavne domen component kandidate koji su direktno vidljivi iz sistemskih dijagrama.
+      constraints:
+      - Ne zaključavati konačnu unutrašnju realizaciju pre component-level sekvenci i storage view-a.
+      - Zadržati jasnu razliku između facade, adapter, store i worker odgovornosti.
+      notes: E-SDC je nosilac persistent i device/backend-oriented state ownership-a; candidate component ID-jevi su standardizovani kao CC_ESDC_*.
+    components:
+    - component_id: CC_ESDC_FACADE
+      name: E-SDC Facade
+      kind: service
+      responsibility: Prima sistemske pozive od ESIR-a i koordinira lokalnu fiskalizaciju, status, bootstrap i export tokove.
+      boundary: facade
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+        - port_ref: P_ESDC_USE_TAXCORE_SHARED
+        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+        - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
+        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+        internal_channels: []
+      provides:
+        ports:
+        - port_ref: P_ESDC_PROV_ESDC_SERVICE
+        internal_channels: []
+      depends_on_component_ids:
+      - CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+      - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes:
+      - id: FM_ESDC_RUNTIME_UNAVAILABLE
+        description: E-SDC lokalni runtime nije responzivan ili je blokiran spoljnim uslovom.
+        mitigation_expectation: Attention/GetStatus tok mora da klasifikuje stanje i vrati operatoru smislen readiness ishod.
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - uid
+          - request_id
+          - command_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+        - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+        - S_SYS_FISCALIZE_INVOICE
+        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+        - S_SYS_LOCAL_AUDIT_EXPORT
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+      name: Command Lifecycle Coordinator
+      kind: worker
+      responsibility: Prima, klasifikuje, primenjuje i potvrđuje backend/media komande kroz jedinstven command lifecycle tok.
+      boundary: internal
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - command_id
+          - uid
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+        - S_SYS_LOCAL_AUDIT_EXPORT
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+      name: Audit and Proof Lifecycle Manager
+      kind: service
+      responsibility: Upravlja AuditPackage backlog-om, proof-of-audit ciklusom i lokalnim export setom.
+      boundary: internal
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: persistent
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - uid
+          - audit_package_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+        - S_SYS_LOCAL_AUDIT_EXPORT
+        - S_SYS_FISCALIZE_INVOICE
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+      name: Status and Operator Recovery Manager
+      kind: service
+      responsibility: Deriviše readiness/status klasifikaciju, vodi PIN/operator recovery i osvežavanje environment konteksta.
+      boundary: internal
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - uid
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_SECURE_ELEMENT_ADAPTER
+      name: Secure Element Adapter
+      kind: adapter
+      responsibility: Realizuje IF_DEP_SECURE_ELEMENT APDU interakcije.
+      boundary: adapter
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - uid
+          - apdu_operation
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_FISCALIZE_INVOICE
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+        - S_SYS_LOCAL_AUDIT_EXPORT
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_TAXCORE_BACKEND_ADAPTER
+      name: TaxCore Backend Adapter
+      kind: adapter
+      responsibility: Realizuje IF_DEP_TAXCORE_ESDC_BACKEND i IF_DEP_TAXCORE_SHARED spoljašnje pozive.
+      boundary: adapter
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_TAXCORE_SHARED
+        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+        - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - request_id
+          - command_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+      name: Removable Media Adapter
+      kind: adapter
+      responsibility: Realizuje IF_DEP_REMOVABLE_MEDIA_IO pristup removable media-u za lokalni audit export i media-delivered command fajlove.
+      boundary: adapter
+      consumes:
+        ports:
+        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - uid
+          - media_mount_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_LOCAL_AUDIT_EXPORT
+      cm_binding_ref: ''
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da bude owner lokalne fiskalizacije i secure-element interakcije.
+      - Da bude owner backend authentication/sync, command lifecycle, audit/proof lifecycle i local audit export toka.
+      - Da drži persistent fiskalno-operativno stanje van ESIR granice.
+      must_not:
+      - Ne sme izlagati poslovnoj aplikaciji direktan dependency-level ugovor prema SE ili TaxCore backend-u.
+      - Ne sme prebacivati ownership audit/proof backlog-a na ESIR ili spoljnog klijenta.
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: E-SDC
+      timeout_expectations: Dependency timeouts i retry windows zatvaraju se u deployment/bootstrap/binding artefaktima.
+    concurrency_model:
+      execution_model: other
+      reentrancy: restricted
+      isolation_scope: shared_state
+      state_sharing_rules: Persistent audit, token, command i readiness stanje deli se kroz E-SDC-owned storage i ne izlazi preko IF_SYS granice.
+    error_model:
+      emitted_errors: []
+      error_translation_rules:
+      - description: SE APDU, backend i audit lifecycle greške prevode se u sistemske readiness/fiscalization/export ishode.
+      failure_modes:
+      - id: FM_ESDC_AUDIT_BACKLOG_STUCK
+        description: Audit backlog ostaje zaglavljen zbog neuspešnog sync/proof ciklusa ili nerešenih komandi.
+        mitigation_expectation: Zadržati stanje za retry ili operator review, bez gubitka lokalnog dokaza.
+    configuration_surface:
+      parameters:
+      - name: backend_base_url
+        type_ref: Url
+        description: Razrešena backend baza za E-SDC API.
+        default_policy: dynamic
+      - name: environment_name
+        type_ref: EnvironmentName
+        description: Aktivni fiskalni environment.
+        default_policy: dynamic
+      environment_dependencies:
+      - id: ENV_SE_PRESENT
+        description: Prisustvo aktivnog Secure Element-a ili pristupa njegovom provideru.
+      - id: ENV_PKI_AVAILABLE
+        description: Prisustvo PKI/certificate konteksta za backend autentikaciju.
+      - id: ENV_MEDIA_OPTIONAL
+        description: Removable media je opciona dependency grana korišćena samo za lokalni audit export.
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements:
+      - Svaka lokalna fiskalizacija mora ostaviti trag dovoljan za kasniji audit/proof i export tok.
+      - Command processing outcome mora biti dokaziv.
+      logging_requirements:
+        level: required
+        correlation_fields:
+        - uid
+        - command_id
+        - audit_package_id
+        - invoice_number
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_ESDC_PROV_ESDC_SERVICE
+    name: P_ESDC_PROV_ESDC_SERVICE
+    type: internal
+    direction: in
+    role: provider
+    interface_ref: IF_SYS_ESDC_SERVICE
+    description: Provider port preko kog E-SDC prima sistemske pozive od ESIR-a.
+  - id: P_ESDC_USE_SECURE_ELEMENT
+    name: P_ESDC_USE_SECURE_ELEMENT
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_SECURE_ELEMENT
+    description: Consumer port za secure-element APDU operacije.
+  - id: P_ESDC_USE_TAXCORE_SHARED
+    name: P_ESDC_USE_TAXCORE_SHARED
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_TAXCORE_SHARED
+    description: Consumer port za shared TaxCore bootstrap podatke.
+  - id: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+    name: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_TAXCORE_ESDC_BACKEND
+    description: Consumer port za backend token/commands/audit/proof lifecycle.
+  - id: P_ESDC_USE_PKI_CLIENT_CONTEXT
+    name: P_ESDC_USE_PKI_CLIENT_CONTEXT
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_PKI_CLIENT_CONTEXT
+    description: Consumer port za čitanje client certificate / PKI konteksta.
+  - id: P_ESDC_USE_REMOVABLE_MEDIA_IO
+    name: P_ESDC_USE_REMOVABLE_MEDIA_IO
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_REMOVABLE_MEDIA_IO
+    description: Consumer port za lokalni audit export i media command fajlove.
+- id: C_BUSINESS_APPLICATION
+  name: Business Application
+  kind: actor
+  purpose: POS/ERP ili druga poslovna aplikacija koja zahteva fiskalizaciju i dobija InvoiceResult.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kao spoljašnji akter.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da šalje validne poslovne zahteve preko IF_SYS_ESIR_SERVICE.
+      must_not:
+      - Ne sme direktno koristiti dependency-level ugovore sistema.
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: Caller-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: per_request
+      state_sharing_rules: Nije definisano ovim view-om.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_BA_USE_ESIR_SERVICE
+    name: P_BA_USE_ESIR_SERVICE
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_SYS_ESIR_SERVICE
+    description: Consumer port ka ESIR business-facing fasadi.
+- id: C_OPERATOR
+  name: Operator
+  kind: actor
+  purpose: Ljudski ili operatorski klijent koji pokreće bootstrap, readiness/proveru PIN-a i koristi lokalni audit export tok.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Objedinjuje operator i provisioning trigger u stabilan akterski identitet.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da pokreće bootstrap/recovery/export tokove kada ih sistemsko stanje zahteva.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: Caller-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: per_request
+      state_sharing_rules: Nije definisano ovim view-om.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_OP_USE_ESIR_SERVICE
+    name: P_OP_USE_ESIR_SERVICE
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_SYS_ESIR_SERVICE
+    description: Consumer port ka ESIR fasadi za bootstrap, readiness check i PIN recovery tokove.
+- id: C_EXTERNAL_VERIFIER
+  name: External Verifier
+  kind: actor
+  purpose: Kupac, inspektor ili aplikacija koja koristi verification reference za proveru računa.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kao spoljni verifikacioni akter.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da koristi javni verifikacioni interfejs sa važećom verification reference.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: Caller-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: per_request
+      state_sharing_rules: Nije definisano ovim view-om.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_EV_USE_PUBLIC_VERIFICATION
+    name: P_EV_USE_PUBLIC_VERIFICATION
+    type: external
+    direction: out
+    role: consumer
+    interface_ref: IF_DEP_PUBLIC_VERIFICATION
+    description: Consumer port ka javnom verifikacionom servisu.
+- id: C_VSDC
+  name: V-SDC
+  kind: external_system
+  purpose: Spoljni TaxCore cloud V-SDC provider za online fiskalizaciju.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kroz provider port i ugovor.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da izloži CreateInvoice ugovor.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: not_applicable
+      retry_policy_owner: Caller
+      timeout_expectations: External-provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_VSDC_PROV_TAXCORE_VSDC
+    name: P_VSDC_PROV_TAXCORE_VSDC
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_TAXCORE_VSDC
+    description: Provider port za online CreateInvoice tok.
+- id: C_TAXCORE_SHARED
+  name: TaxCore.API Shared
+  kind: external_system
+  purpose: Spoljni shared servis koji daje bootstrap podatke i zajedničku konfiguraciju.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kroz provider port i ugovor.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da isporuči environment, configuration, tax rates i encryption certificate podatke.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: External-provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_TCS_PROV_TAXCORE_SHARED
+    name: P_TCS_PROV_TAXCORE_SHARED
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_TAXCORE_SHARED
+    description: Provider port za shared TaxCore bootstrap podatke.
+- id: C_TAXCORE_BACKEND
+  name: TaxCore Backend
+  kind: external_system
+  purpose: Spoljni E-SDC backend servis za token, commands, audit i proof tokove.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kroz provider port i ugovor.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da obezbedi backend token/command/audit/proof ugovor prema E-SDC-u.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: External-provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_TCB_PROV_TAXCORE_ESDC_BACKEND
+    name: P_TCB_PROV_TAXCORE_ESDC_BACKEND
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_TAXCORE_ESDC_BACKEND
+    description: Provider port za backend token/commands/audit/proof lifecycle.
+- id: C_SECURE_ELEMENT
+  name: Security Element
+  kind: external_system
+  purpose: Spoljni secure element koji potpisuje račune i učestvuje u audit/proof APDU ciklusu.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kroz provider port i ugovor.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da obezbedi APDU operacije potrebne za lokalnu fiskalizaciju i audit/proof lifecycle.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: not_applicable
+      retry_policy_owner: Caller
+      timeout_expectations: Device/provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: restricted
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_SE_PROV_SECURE_ELEMENT
+    name: P_SE_PROV_SECURE_ELEMENT
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_SECURE_ELEMENT
+    description: Provider port za secure-element APDU ugovor.
+- id: C_PKI_CONTEXT
+  name: PKI Applet / Client Certificate
+  kind: external_system
+  purpose: Spoljni izvor PKI/certificate konteksta za client-auth/TLS backend tokove.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kroz provider port i ugovor.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da omogući čitanje client certificate konteksta.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: Device/provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_PKI_PROV_CLIENT_CERT_CONTEXT
+    name: P_PKI_PROV_CLIENT_CERT_CONTEXT
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_PKI_CLIENT_CONTEXT
+    description: Provider port za client certificate / PKI context ugovor.
+- id: C_REMOVABLE_MEDIA
+  name: Removable Media
+  kind: external_system
+  purpose: SD kartica, USB ili drugo prenosivo skladište korišćeno za lokalni audit export i komandne fajlove.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan kao file-based dependency.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da obezbedi pristup root/folder/file strukturi za lokalni audit export.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: E-SDC
+      timeout_expectations: Device/provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: restricted
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_MEDIA_PROV_REMOVABLE_MEDIA_IO
+    name: P_MEDIA_PROV_REMOVABLE_MEDIA_IO
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_REMOVABLE_MEDIA_IO
+    description: Provider port za removable-media file I/O ugovor.
+- id: C_PUBLIC_VERIFICATION
+  name: Public Verification Service
+  kind: external_system
+  purpose: Spoljni javni verifikacioni servis koji vraća machine-readable verified public view računa.
+  boundary: external
+  parent_component_id: ''
+  components_map:
+    policy:
+      intent: Nije predmet unutrašnje razrade u ovom view-u.
+      constraints: []
+      notes: Modelovan samo kroz provider port i ugovor.
+    components: []
+  architectural_contract:
+    responsibilities:
+      must:
+      - Da izloži javni verification ugovor.
+      must_not: []
+    interaction_semantics:
+      sync_mode: sync
+      ordering_guarantee: per_session
+      idempotency: recommended
+      retry_policy_owner: Caller
+      timeout_expectations: External-provider-defined
+    concurrency_model:
+      execution_model: other
+      reentrancy: allowed
+      isolation_scope: other
+      state_sharing_rules: Van kontrole ovog sistema.
+    error_model:
+      emitted_errors: []
+      error_translation_rules: []
+      failure_modes: []
+    configuration_surface:
+      parameters: []
+      environment_dependencies: []
+    observability_obligations:
+      mandatory_events: []
+      audit_requirements: []
+      logging_requirements:
+        level: minimal
+        correlation_fields: []
+    decision_record_refs: []
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  ports:
+  - id: P_PV_PROV_PUBLIC_VERIFICATION
+    name: P_PV_PROV_PUBLIC_VERIFICATION
+    type: external
+    direction: in
+    role: provider
+    interface_ref: IF_DEP_PUBLIC_VERIFICATION
+    description: Provider port za javni verification ugovor.
+connectors:
+- id: C_BA__ESIR__ESIR_SERVICE
+  name: Business Application -> ESIR
+  type: logical
+  purpose: Poslovna aplikacija koristi business-facing ESIR fasadu.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_SYS_ESIR_SERVICE
+  endpoints:
+  - role: consumer
+    component_id: C_BUSINESS_APPLICATION
+    port_id: P_BA_USE_ESIR_SERVICE
+  - role: provider
+    component_id: C_ESIR
+    port_id: P_ESIR_PROV_ESIR_SERVICE
+- id: C_OP__ESIR__ESIR_SERVICE
+  name: Operator -> ESIR
+  type: logical
+  purpose: Operator koristi ESIR fasadu za bootstrap, readiness i recovery tokove.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_SYS_ESIR_SERVICE
+  endpoints:
+  - role: consumer
+    component_id: C_OPERATOR
+    port_id: P_OP_USE_ESIR_SERVICE
+  - role: provider
+    component_id: C_ESIR
+    port_id: P_ESIR_PROV_ESIR_SERVICE
+- id: C_ESIR__ESDC__ESDC_SERVICE
+  name: ESIR -> E-SDC
+  type: logical
+  purpose: ESIR delegira lokalnu fiskalizaciju, readiness i environment/status tokove prema E-SDC-u.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_SYS_ESDC_SERVICE
+  endpoints:
+  - role: consumer
+    component_id: C_ESIR
+    port_id: P_ESIR_USE_ESDC_SERVICE
+  - role: provider
+    component_id: C_ESDC
+    port_id: P_ESDC_PROV_ESDC_SERVICE
+- id: C_ESIR__VSDC__TAXCORE_VSDC
+  name: ESIR -> V-SDC
+  type: logical
+  purpose: ESIR koristi online V-SDC CreateInvoice put.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_TAXCORE_VSDC
+  endpoints:
+  - role: consumer
+    component_id: C_ESIR
+    port_id: P_ESIR_USE_TAXCORE_VSDC
+  - role: provider
+    component_id: C_VSDC
+    port_id: P_VSDC_PROV_TAXCORE_VSDC
+- id: C_ESDC__SE__SECURE_ELEMENT
+  name: E-SDC -> Security Element
+  type: logical
+  purpose: E-SDC koristi secure-element APDU capability za signing i audit/proof tokove.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_SECURE_ELEMENT
+  endpoints:
+  - role: consumer
+    component_id: C_ESDC
+    port_id: P_ESDC_USE_SECURE_ELEMENT
+  - role: provider
+    component_id: C_SECURE_ELEMENT
+    port_id: P_SE_PROV_SECURE_ELEMENT
+- id: C_ESDC__TCS__TAXCORE_SHARED
+  name: E-SDC -> TaxCore Shared
+  type: logical
+  purpose: E-SDC čita shared bootstrap i konfiguracione podatke.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_TAXCORE_SHARED
+  endpoints:
+  - role: consumer
+    component_id: C_ESDC
+    port_id: P_ESDC_USE_TAXCORE_SHARED
+  - role: provider
+    component_id: C_TAXCORE_SHARED
+    port_id: P_TCS_PROV_TAXCORE_SHARED
+- id: C_ESDC__TCB__TAXCORE_ESDC_BACKEND
+  name: E-SDC -> TaxCore Backend
+  type: logical
+  purpose: E-SDC koristi backend za token, komande, audit i proof lifecycle.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_TAXCORE_ESDC_BACKEND
+  endpoints:
+  - role: consumer
+    component_id: C_ESDC
+    port_id: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+  - role: provider
+    component_id: C_TAXCORE_BACKEND
+    port_id: P_TCB_PROV_TAXCORE_ESDC_BACKEND
+- id: C_ESDC__PKI__CLIENT_CERT_CONTEXT
+  name: E-SDC -> PKI Client Context
+  type: logical
+  purpose: E-SDC koristi PKI/certificate kontekst za backend autentikaciju.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_PKI_CLIENT_CONTEXT
+  endpoints:
+  - role: consumer
+    component_id: C_ESDC
+    port_id: P_ESDC_USE_PKI_CLIENT_CONTEXT
+  - role: provider
+    component_id: C_PKI_CONTEXT
+    port_id: P_PKI_PROV_CLIENT_CERT_CONTEXT
+- id: C_ESDC__MEDIA__REMOVABLE_MEDIA_IO
+  name: E-SDC -> Removable Media
+  type: logical
+  purpose: E-SDC koristi file-based removable media I/O za lokalni audit export i command fajlove.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: shared_data
+  interaction_type: other
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_REMOVABLE_MEDIA_IO
+  endpoints:
+  - role: consumer
+    component_id: C_ESDC
+    port_id: P_ESDC_USE_REMOVABLE_MEDIA_IO
+  - role: provider
+    component_id: C_REMOVABLE_MEDIA
+    port_id: P_MEDIA_PROV_REMOVABLE_MEDIA_IO
+- id: C_EV__PV__PUBLIC_VERIFICATION
+  name: External Verifier -> Public Verification
+  type: logical
+  purpose: Spoljni verifier koristi javni verification servis.
+  satisfies_concerns: []
+  satisfies_constraints: []
+  allocated_requirements: []
+  mechanism: request_response
+  interaction_type: request_response
+  directionality: bidirectional
+  interface_refs:
+  - IF_DEP_PUBLIC_VERIFICATION
+  endpoints:
+  - role: consumer
+    component_id: C_EXTERNAL_VERIFIER
+    port_id: P_EV_USE_PUBLIC_VERIFICATION
+  - role: provider
+    component_id: C_PUBLIC_VERIFICATION
+    port_id: P_PV_PROV_PUBLIC_VERIFICATION
+analysis_notes:
+  consistency_checks: '- View je izveden direktno iz osam sistemskih dinamičkih scenarija i njihovih eksplicitnih use/provide port oznaka.
+
+    - Granica ownership-a je namerno oštra: ESIR = business-facing orchestration; E-SDC = local fiscal engine + backend/audit/proof/export ownership.
+
+    - Transport, endpoint binding, deployment node-ovi i concrete adapter attachment nisu modelovani ovde; oni pripadaju deployment, wiring i bootstrap artefaktima.
+
+    - Dodata je posebna interfaces sekcija i za dve dependency grane koje nisu imale eksplicitno imenovane portove u svakoj sekvenci (PKI i removable media), jer bez toga structural view ostaje nedorečen.
+
+    - Operator i provisioning trigger su spojeni u jedan stabilan akter C_OPERATOR; to uklanja scenario-specifičnu duplikaciju bez gubitka smisla.
+
+    '
+  open_issues:
+  - Ako želiš strogo puristički view, možeš izbaciti candidate components iz ESIR/E-SDC i ostaviti samo komponente + portove; trenutno su tu kao most ka sledećem nivou razrade.
+  - Public verification ostaje spoljašnji verifier -> public service tok; Open Fiscal Core u ovoj bazi samo emituje verification reference kroz fiskalni izlaz i zato nema zaseban runtime connector prema public verification servisu.
+  - Resource budgets, konkretni error code refs i event refs nisu alocirani na ovom nivou i treba ih zaključati tek posle state/storage/deployment rada.

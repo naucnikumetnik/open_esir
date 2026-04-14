@@ -1,0 +1,371 @@
+@startuml
+title DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF - Data View (logical)
+
+hide empty members
+skinparam classAttributeIconSize 0
+skinparam Shadowing false
+
+' Conventions for parser (deterministic):
+' - IDs: ST_* store, E_* entity, AP_* access_pattern, BND_* binding, CORR_* correspondence
+' - Defaults: payload.format=json, payload.content_type=application/json unless overridden
+' - Stored record names under OFC_STORAGE.* are internal logical record shapes for this slice
+
+note top
+  Focused slice for local fiscal evidence, audit backlog handling,
+  and proof-of-audit lifecycle state.
+
+  Cross-slice entity dependencies referenced here but defined primarily in
+  DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT:
+  - E_BACKEND_COMMAND_RECORD
+  - E_EXPORT_RESULT_RECORD
+end note
+
+package "Stores" {
+  class "ST_AUDIT_EVIDENCE_STATE" as ST_AUDIT_EVIDENCE_STATE {
+    kind=logical_store
+    owner=DEP_ESDC
+    boundary=internal
+    access=record_store
+    durability=durable
+    consistency=strong
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_STATUS_RECOVERY+DEP_EXPORT
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_until_verified_and_policy_satisfied
+    gov.delete_policy=status_driven_and_policy_bound
+    gov.exportability=operator_exportable_without_private_material
+  }
+
+  class "ST_PROOF_LIFECYCLE_STATE" as ST_PROOF_LIFECYCLE_STATE {
+    kind=logical_store
+    owner=DEP_ESDC
+    boundary=internal
+    access=record_store
+    durability=durable
+    consistency=strong
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_STATUS_RECOVERY+DEP_EXPORT
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_until_proof_cycle_closed_or_policy_expired
+    gov.delete_policy=close_cycle_then_prune_per_policy
+    gov.exportability=restricted_operator_support
+  }
+}
+
+package "Entities - audit evidence" {
+  class "E_LOCAL_JOURNAL_RECORD" as E_LOCAL_JOURNAL_RECORD {
+    store=ST_AUDIT_EVIDENCE_STATE
+    owner=DEP_ESDC
+    mutability=append_only
+    pk=OFC_STORAGE.LocalJournalKey
+    nk.invoice_number=InvoiceNumber
+    payload=OFC_STORAGE.LocalJournalRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_EXPORT+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_for_local_operator_audit_and_support
+    gov.delete_policy=policy_driven_compaction_only
+    gov.exportability=operator_visible
+    inv.append_after_fiscalization_only=true
+    inv.core_fields_plus_reference_enrichment=true
+  }
+
+  class "E_AUDIT_PACKAGE_RECORD" as E_AUDIT_PACKAGE_RECORD {
+    store=ST_AUDIT_EVIDENCE_STATE
+    owner=DEP_ESDC
+    mutability=mutable
+    pk=OFC_STORAGE.AuditPackageRef
+    nk.uid=Uid
+    payload=AuditPackage
+    meta=OFC_STORAGE.AuditPackageMeta
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_EXPORT+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_until_backend_verification_and_policy_clearance
+    gov.delete_policy=status4_delete_or_policy_hold
+    gov.exportability=operator_exportable_without_private_material
+    inv.key_iv_payload_required=true
+    inv.uid_scoped=true
+  }
+
+  class "E_AUDIT_BACKLOG_INDEX" as E_AUDIT_BACKLOG_INDEX {
+    store=ST_AUDIT_EVIDENCE_STATE
+    owner=DEP_ESDC
+    mutability=mutable
+    pk=OFC_STORAGE.AuditBacklogScopeKey
+    payload=OFC_STORAGE.AuditBacklogIndex
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_ESDC+DEP_EXPORT
+    gov.allowed_readers=DEP_ESDC+DEP_EXPORT+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_while_any_audit_package_or_proof_cycle_is_open
+    gov.delete_policy=rebuild_or_compact_when_empty
+    gov.exportability=restricted_operator_support
+    inv.rebuildable_from=E_AUDIT_PACKAGE_RECORD+E_PROOF_CYCLE_RECORD+E_EXPORT_RESULT_RECORD
+  }
+}
+
+package "Entities - proof lifecycle" {
+  class "E_PROOF_CYCLE_RECORD" as E_PROOF_CYCLE_RECORD {
+    store=ST_PROOF_LIFECYCLE_STATE
+    owner=DEP_ESDC
+    mutability=mutable
+    pk=OFC_STORAGE.ProofCycleRef
+    nk.uid=Uid
+    payload=OFC_STORAGE.ProofCycleRecord
+    meta=OFC_STORAGE.ProofCycleMeta
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_STATUS_RECOVERY+DEP_EXPORT
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_while_proof_cycle_is_open_or_recently_closed
+    gov.delete_policy=close_then_prune_per_policy
+    gov.exportability=restricted_operator_support
+    inv.one_active_cycle_per_uid=true
+  }
+
+  class "E_AUDIT_REQUEST_PAYLOAD_RECORD" as E_AUDIT_REQUEST_PAYLOAD_RECORD {
+    store=ST_PROOF_LIFECYCLE_STATE
+    owner=DEP_ESDC
+    mutability=immutable
+    pk=OFC_STORAGE.ProofCycleRef
+    payload=AuditRequestPayload
+    payload.format=base64_string
+    payload.content_type=application/octet-stream
+    meta=OFC_STORAGE.StoredBlobMeta
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_EXPORT
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_until_proof_cycle_closes
+    gov.delete_policy=prune_with_parent_proof_cycle
+    gov.exportability=restricted_operator_support
+    inv.source=StartAuditApdu
+  }
+
+  class "E_PROOF_OF_AUDIT_REQUEST_RECORD" as E_PROOF_OF_AUDIT_REQUEST_RECORD {
+    store=ST_PROOF_LIFECYCLE_STATE
+    owner=DEP_ESDC
+    mutability=immutable
+    pk=OFC_STORAGE.ProofCycleRef
+    payload=ProofOfAuditRequest
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_until_proof_cycle_closes
+    gov.delete_policy=prune_with_parent_proof_cycle
+    gov.exportability=restricted_operator_support
+    inv.composed_from=AuditRequestPayload+AmountStatusResponse.sum+AmountStatusResponse.limit
+  }
+
+  class "E_PROOF_ARTIFACT_RECORD" as E_PROOF_ARTIFACT_RECORD {
+    store=ST_PROOF_LIFECYCLE_STATE
+    owner=DEP_ESDC
+    mutability=mutable
+    pk=OFC_STORAGE.ProofCycleRef
+    payload=ProofOfAudit
+    payload.format=base64_string
+    payload.content_type=application/octet-stream
+    meta=OFC_STORAGE.ProofArtifactMeta
+    gov.allowed_writers=DEP_ESDC
+    gov.allowed_readers=DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_closed_cycle_evidence_per_policy
+    gov.delete_policy=policy_driven_after_cycle_closure
+    gov.exportability=restricted_operator_support
+    inv.command_or_completion_context_required=true
+  }
+}
+
+package "AccessPatterns" {
+  class "AP_PERSIST_LOCAL_FISCAL_EVIDENCE" as AP_PERSIST_LOCAL_FISCAL_EVIDENCE {
+    owner=DEP_ESDC
+    op=persist_local_fiscal_evidence
+    scenario=S_SYS_FISCALIZE_INVOICE
+    steps=S3b.5+S3b.6+S3b.7
+    write.1=E_LOCAL_JOURNAL_RECORD:insert
+    write.2=E_AUDIT_PACKAGE_RECORD:insert
+    read.1=E_AUDIT_BACKLOG_INDEX:by_pk:strong_optional
+    write.3=E_AUDIT_BACKLOG_INDEX:upsert
+  }
+
+  class "AP_RESOLVE_AUDIT_BACKLOG_DISPOSITION" as AP_RESOLVE_AUDIT_BACKLOG_DISPOSITION {
+    owner=DEP_ESDC
+    op=resolve_audit_backlog_disposition
+    scenario=S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    steps=S5.1+S5.6a+S5.6b+S5.6c
+    read.1=E_AUDIT_PACKAGE_RECORD:by_pk:strong
+    read.2=E_AUDIT_BACKLOG_INDEX:by_pk:strong
+    write.1=E_AUDIT_PACKAGE_RECORD:delete_or_retain
+    write.2=E_AUDIT_BACKLOG_INDEX:upsert
+    rule.status4_delete_local=true
+    rule.status1_retry_only=true
+    rule.audit_status_commands_persisted=true
+  }
+
+  class "AP_START_PROOF_CYCLE" as AP_START_PROOF_CYCLE {
+    owner=DEP_ESDC
+    op=start_proof_cycle
+    scenario=S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    steps=S1.2+S5.1+S5.2+S5.3+S6.1
+    read.1=E_PROOF_CYCLE_RECORD:by_pk:strong_optional
+    write.1=E_AUDIT_REQUEST_PAYLOAD_RECORD:insert_or_replace
+    write.2=E_PROOF_OF_AUDIT_REQUEST_RECORD:insert_or_replace
+    write.3=E_PROOF_CYCLE_RECORD:upsert
+  }
+
+  class "AP_COMPLETE_PROOF_CYCLE" as AP_COMPLETE_PROOF_CYCLE {
+    owner=DEP_ESDC
+    op=complete_proof_cycle
+    scenario=S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    steps=S7.1+S7.2+S7a.1+S8.1+S8.2
+    read.1=E_PROOF_CYCLE_RECORD:by_pk:strong
+    read.2=E_BACKEND_COMMAND_RECORD:by_uid_or_command_type:strong_optional
+    write.1=E_PROOF_ARTIFACT_RECORD:insert_or_replace
+    write.2=E_PROOF_CYCLE_RECORD:update
+    read.3=E_AUDIT_BACKLOG_INDEX:by_pk:strong_optional
+    write.3=E_AUDIT_BACKLOG_INDEX:upsert
+  }
+}
+
+package "Bindings" {
+  class "BND_EMBEDDED_LOCAL_FS" as BND_EMBEDDED_LOCAL_FS {
+    kind=tenant_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+
+    fs.root.audit=/ofc/audit_journal
+    fs.root.proof=/ofc/proof_store
+
+    fs.path.local_journal={audit}/journal/{uid}/{journal_ref}.json
+    fs.path.audit_package={audit}/audit_packages/{uid}/{audit_package_ref}.json
+    fs.path.audit_backlog_index={audit}/indexes/{uid}/{environment_name}/audit_backlog_index.json
+    fs.path.proof_cycle={proof}/cycles/{uid}/{proof_cycle_ref}.json
+    fs.path.audit_request_payload={proof}/cycles/{uid}/{proof_cycle_ref}/audit_request_payload.bin
+    fs.path.proof_of_audit_request={proof}/cycles/{uid}/{proof_cycle_ref}/proof_of_audit_request.json
+    fs.path.proof_artifact={proof}/cycles/{uid}/{proof_cycle_ref}/proof_of_audit.bin
+
+    atomicity.write_policy=temp_write_then_rename
+    repair.audit_backlog_rebuildable=true
+
+    apply=[E_LOCAL_JOURNAL_RECORD,E_AUDIT_PACKAGE_RECORD,E_AUDIT_BACKLOG_INDEX,E_PROOF_CYCLE_RECORD,E_AUDIT_REQUEST_PAYLOAD_RECORD,E_PROOF_OF_AUDIT_REQUEST_RECORD,E_PROOF_ARTIFACT_RECORD]
+  }
+
+  class "BND_LOCAL_SERVICE_LOCAL_FS" as BND_LOCAL_SERVICE_LOCAL_FS {
+    kind=tenant_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST+PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+
+    fs.root.audit=/srv/ofc/audit_journal
+    fs.root.proof=/srv/ofc/proof_store
+
+    fs.path.local_journal={audit}/journal/{uid}/{journal_ref}.json
+    fs.path.audit_package={audit}/audit_packages/{uid}/{audit_package_ref}.json
+    fs.path.audit_backlog_index={audit}/indexes/{uid}/{environment_name}/audit_backlog_index.json
+    fs.path.proof_cycle={proof}/cycles/{uid}/{proof_cycle_ref}.json
+    fs.path.audit_request_payload={proof}/cycles/{uid}/{proof_cycle_ref}/audit_request_payload.bin
+    fs.path.proof_of_audit_request={proof}/cycles/{uid}/{proof_cycle_ref}/proof_of_audit_request.json
+    fs.path.proof_artifact={proof}/cycles/{uid}/{proof_cycle_ref}/proof_of_audit.bin
+
+    atomicity.write_policy=temp_write_then_rename
+    repair.audit_backlog_rebuildable=true
+
+    apply=[E_LOCAL_JOURNAL_RECORD,E_AUDIT_PACKAGE_RECORD,E_AUDIT_BACKLOG_INDEX,E_PROOF_CYCLE_RECORD,E_AUDIT_REQUEST_PAYLOAD_RECORD,E_PROOF_OF_AUDIT_REQUEST_RECORD,E_PROOF_ARTIFACT_RECORD]
+  }
+
+  class "BND_HOSTED_ACCESS_EDGE_LOCAL_FS" as BND_HOSTED_ACCESS_EDGE_LOCAL_FS {
+    kind=tenant_edge_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+
+    fs.root.audit=/srv/ofc_edge/audit_journal
+    fs.root.proof=/srv/ofc_edge/proof_store
+
+    fs.path.local_journal={audit}/journal/{uid}/{journal_ref}.json
+    fs.path.audit_package={audit}/audit_packages/{uid}/{audit_package_ref}.json
+    fs.path.audit_backlog_index={audit}/indexes/{uid}/{environment_name}/audit_backlog_index.json
+    fs.path.proof_cycle={proof}/cycles/{uid}/{proof_cycle_ref}.json
+    fs.path.audit_request_payload={proof}/cycles/{uid}/{proof_cycle_ref}/audit_request_payload.bin
+    fs.path.proof_of_audit_request={proof}/cycles/{uid}/{proof_cycle_ref}/proof_of_audit_request.json
+    fs.path.proof_artifact={proof}/cycles/{uid}/{proof_cycle_ref}/proof_of_audit.bin
+
+    atomicity.write_policy=temp_write_then_rename
+    repair.audit_backlog_rebuildable=true
+
+    apply=[E_LOCAL_JOURNAL_RECORD,E_AUDIT_PACKAGE_RECORD,E_AUDIT_BACKLOG_INDEX,E_PROOF_CYCLE_RECORD,E_AUDIT_REQUEST_PAYLOAD_RECORD,E_PROOF_OF_AUDIT_REQUEST_RECORD,E_PROOF_ARTIFACT_RECORD]
+  }
+}
+
+package "Correspondences" {
+  class "CORR_LOCAL_JOURNAL_PAYLOAD" as CORR_LOCAL_JOURNAL_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.LocalJournalRecord
+    to=E_LOCAL_JOURNAL_RECORD
+  }
+
+  class "CORR_AUDIT_PACKAGE_PAYLOAD" as CORR_AUDIT_PACKAGE_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=AuditPackage
+    to=E_AUDIT_PACKAGE_RECORD
+  }
+
+  class "CORR_AUDIT_BACKLOG_INDEX_PAYLOAD" as CORR_AUDIT_BACKLOG_INDEX_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.AuditBacklogIndex
+    to=E_AUDIT_BACKLOG_INDEX
+  }
+
+  class "CORR_PROOF_CYCLE_PAYLOAD" as CORR_PROOF_CYCLE_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.ProofCycleRecord
+    to=E_PROOF_CYCLE_RECORD
+  }
+
+  class "CORR_AUDIT_REQUEST_PAYLOAD" as CORR_AUDIT_REQUEST_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=AuditRequestPayload
+    to=E_AUDIT_REQUEST_PAYLOAD_RECORD
+  }
+
+  class "CORR_PROOF_OF_AUDIT_REQUEST_PAYLOAD" as CORR_PROOF_OF_AUDIT_REQUEST_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=ProofOfAuditRequest
+    to=E_PROOF_OF_AUDIT_REQUEST_RECORD
+  }
+
+  class "CORR_PROOF_ARTIFACT_PAYLOAD" as CORR_PROOF_ARTIFACT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=ProofOfAudit
+    to=E_PROOF_ARTIFACT_RECORD
+  }
+
+  class "CORR_OP_FISCALIZE_WRITES" as CORR_OP_FISCALIZE_WRITES {
+    kind=operation_writes_entities
+    from=AP_PERSIST_LOCAL_FISCAL_EVIDENCE
+    to=[E_LOCAL_JOURNAL_RECORD,E_AUDIT_PACKAGE_RECORD,E_AUDIT_BACKLOG_INDEX]
+  }
+
+  class "CORR_OP_AUDIT_DISPOSITION_WRITES" as CORR_OP_AUDIT_DISPOSITION_WRITES {
+    kind=operation_writes_entities
+    from=AP_RESOLVE_AUDIT_BACKLOG_DISPOSITION
+    to=[E_AUDIT_PACKAGE_RECORD,E_AUDIT_BACKLOG_INDEX]
+    rule=audit_status_controls_local_retention
+  }
+
+  class "CORR_OP_PROOF_START_WRITES" as CORR_OP_PROOF_START_WRITES {
+    kind=operation_writes_entities
+    from=AP_START_PROOF_CYCLE
+    to=[E_AUDIT_REQUEST_PAYLOAD_RECORD,E_PROOF_OF_AUDIT_REQUEST_RECORD,E_PROOF_CYCLE_RECORD]
+  }
+
+  class "CORR_OP_PROOF_COMPLETE_WRITES" as CORR_OP_PROOF_COMPLETE_WRITES {
+    kind=operation_writes_entities
+    from=AP_COMPLETE_PROOF_CYCLE
+    to=[E_PROOF_ARTIFACT_RECORD,E_PROOF_CYCLE_RECORD,E_AUDIT_BACKLOG_INDEX]
+  }
+}
+
+@enduml

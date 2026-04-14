@@ -32,7 +32,7 @@ note over ESDC, MEDIA
   Commands on media root are processed before audit export.
 end note
 
-group S1 "Insert removable media and detect local-audit trigger"
+group S1 "GRP_LOCAL_EXPORT_DETECT_MEDIA_TRIGGER"
   OP -> MEDIA : insert removable media\n[step=S1.1]
   ESDC -> ESDC : detect media insertion\n[step=S1.2]
   ESDC -> ESDC : validate supported filesystem and mount access\n[step=S1.3]
@@ -40,20 +40,20 @@ end
 
 alt [COND=unsupported_media_or_filesystem]
 
-  group S1a "Reject invalid media"
+  group S1a "GRP_LOCAL_EXPORT_REJECT_INVALID_MEDIA"
     ESDC -> ESDC : mark export blocked by invalid media\n[step=S1a.1]
     ESDC --> OP : [step=S1a.2]\n[vals result=LocalAuditExportResult(media_invalid)]
   end
 
 else [COND=media_ready]
 
-  group S2 "Inspect media root for command file"
+  group S2 "GRP_LOCAL_EXPORT_INSPECT_MEDIA_FOR_COMMAND_FILE"
     ESDC -> MEDIA : inspect root for {UID}.commands\n[step=S2.1]
   end
 
   alt [COND=commands_present]
 
-    group S3 "Execute commands from media before audit export"
+    group S3 "GRP_LOCAL_EXPORT_EXECUTE_MEDIA_COMMANDS"
       ESDC -> ESDC : parse command file and filter commands for active SE UID\n[step=S3.1]
 
       loop [for each command]
@@ -69,13 +69,13 @@ else [COND=media_ready]
 
   else [COND=no_commands_present]
 
-    group S3a "Continue without media-delivered commands"
+    group S3a "GRP_LOCAL_EXPORT_CONTINUE_WITHOUT_MEDIA_COMMANDS"
       ESDC -> ESDC : continue directly to local audit export\n[step=S3a.1]
     end
 
   end
 
-  group S4 "Determine local audit export set"
+  group S4 "GRP_LOCAL_EXPORT_DETERMINE_EXPORT_SET"
     ESDC -> ESDC : enumerate pending local AuditPackage backlog\n[step=S4.1]
     ESDC -> ESDC : group backlog by active Secure Element UID\n[step=S4.2]
     ESDC -> ESDC : filter packages by current target environment\n[step=S4.3]
@@ -83,17 +83,17 @@ else [COND=media_ready]
 
   alt [COND=no_pending_audit_packages]
 
-    group S4a "No pending local audit packages"
+    group S4a "GRP_LOCAL_EXPORT_HANDLE_NO_PENDING_PACKAGES"
       ESDC -> ESDC : keep local audit state unchanged\n[step=S4a.1]
     end
 
   else [COND=pending_audit_packages_present]
 
-    group S5 "Prepare removable-media folder structure"
+    group S5 "GRP_LOCAL_EXPORT_PREPARE_MEDIA_FOLDER_STRUCTURE"
       ESDC -> MEDIA : ensure {UID}/ folder exists\n[step=S5.1]
     end
 
-    group S6 "Export audit packages to removable media"
+    group S6 "GRP_LOCAL_EXPORT_EXPORT_AUDIT_PACKAGES"
       loop [for each pending audit package]
         ESDC -> MEDIA : write {UID}/{UID}-{UID}-{Ordinal_Number}.json\n[step=S6.1]\n[vals artifact=AuditPackage]
       end
@@ -101,7 +101,7 @@ else [COND=media_ready]
 
     alt [COND=arp_available_or_generated_for_local_audit]
 
-      group S7 "Export ARP file"
+      group S7 "GRP_LOCAL_EXPORT_EXPORT_ARP_FILE"
         ESDC -> SE : IF_DEP_SECURE_ELEMENT.StartAuditApdu() -> AuditRequestPayload\n[step=S7.1]
         activate SE
         SE --> ESDC : [step=S7.1r]\n[vals result=AuditRequestPayload]
@@ -112,7 +112,7 @@ else [COND=media_ready]
 
     else [COND=no_arp_available]
 
-      group S7a "Skip ARP export"
+      group S7a "GRP_LOCAL_EXPORT_SKIP_ARP_EXPORT"
         ESDC -> ESDC : continue without ARP file\n[step=S7a.1]
       end
 
@@ -120,7 +120,7 @@ else [COND=media_ready]
 
   end
 
-  group S8 "Close local export outcome"
+  group S8 "GRP_LOCAL_EXPORT_CLOSE_EXPORT_OUTCOME"
     ESDC -> ESDC : keep exported audit packages in local non-volatile memory\n[step=S8.1]
     ESDC -> ESDC : mark local audit export outcome\n[step=S8.2]
     ESDC --> OP : [step=S8.3]\n[vals result=LocalAuditExportResult(export_completed | commands_processed_and_export_completed | no_pending_packages | environment_mismatch | export_partial)]

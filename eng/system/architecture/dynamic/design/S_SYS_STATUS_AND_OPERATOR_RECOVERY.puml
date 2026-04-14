@@ -38,21 +38,21 @@ note over ESDC, SE
   VerifyPin unlocks Secure Element use when PIN is required.
 end note
 
-group S1 "Request readiness check"
+group S1 "GRP_STATUS_REQUEST_READINESS_CHECK"
   OP -> ESIR : IF_SYS_ESIR_SERVICE.CheckReady() -> ReadinessResult\n[step=S1.1]\n[connection use_port=P_OP_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_OP__ESIR__ESIR_SERVICE]
   activate ESIR
   ESIR -> ESDC : IF_SYS_ESDC_SERVICE.CheckReady() -> ReadinessResult\n[step=S1.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]
   activate ESDC
 end
 
-group S2 "Probe E-SDC availability"
+group S2 "GRP_STATUS_PROBE_ESDC_AVAILABILITY"
   ESDC -> ESDC : ensure local runtime is responsive\n[step=S2.1]
   ESIR -> ESDC : IF_SYS_ESDC_SERVICE.Attention()\n[step=S2.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-201 · HTTP GET /api/v3/attention]
 end
 
 alt [COND=attention_failed]
 
-  group S2a "Handle unavailable E-SDC"
+  group S2a "GRP_STATUS_HANDLE_ESDC_UNAVAILABLE"
     ESDC -> ESDC : mark state unavailable\n[step=S2a.1]
     ESIR --> OP : [step=S2a.2]\n[vals result=ReadinessResult(unavailable)]
     deactivate ESDC
@@ -61,12 +61,18 @@ alt [COND=attention_failed]
 
 else [COND=attention_ok]
 
-  group S3 "Read current status"
+  group S3 "GRP_STATUS_READ_CURRENT_STATUS"
     ESIR -> ESDC : IF_SYS_ESDC_SERVICE.GetStatus() -> StatusResponse\n[step=S3.1]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-202 · HTTP GET /api/v3/status]
     ESDC --> ESIR : [step=S3.1r]\n[vals result=StatusResponse(isPinRequired, auditRequired, sdcDateTime, uid, gsc)]
   end
 
-  group S4 "Evaluate recovery needs"
+  group S3a "GRP_STATUS_EVALUATE_ONLINE_PATH_AVAILABILITY"
+    ESIR -> ESIR : evaluate configured fiscalization mode (V-PFR / L-PFR)\n[step=S3a.1]
+    ESIR -> ESIR : evaluate internet reachability and remote V-SDC path usability\n[step=S3a.2]
+    ESIR -> ESIR : derive online-path availability classification\n[step=S3a.3]
+  end
+  
+  group S4 "GRP_STATUS_EVALUATE_RECOVERY_NEEDS"
     ESDC -> ESDC : check time synchronization state\n[step=S4.1]
     ESDC -> ESDC : check Secure Element certificate validity window\n[step=S4.2]
     ESDC -> ESDC : derive readiness class from status and local checks\n[step=S4.3]
@@ -74,14 +80,14 @@ else [COND=attention_ok]
 
   alt [COND=auditRequired == true]
 
-    group S4a "Audit-required blocking condition"
+    group S4a "GRP_STATUS_BLOCK_ON_AUDIT_REQUIRED"
       ESDC -> ESDC : mark audit required\n[step=S4a.1]
       ESIR --> OP : [step=S4a.2]\n[vals result=ReadinessResult(audit_required)]
     end
 
   else [COND=isPinRequired == true]
 
-    group S5 "Recover PIN-required state"
+    group S5 "GRP_STATUS_RECOVER_PIN_REQUIRED_STATE"
       OP -> ESIR : IF_SYS_ESIR_SERVICE.VerifyPin(pin:PinPlainText) -> GeneralStatusCodeText\n[step=S5.1]\n[connection use_port=P_OP_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_OP__ESIR__ESIR_SERVICE]
       ESIR -> ESDC : IF_SYS_ESDC_SERVICE.VerifyPin(pin:PinPlainText) -> GeneralStatusCodeText\n[step=S5.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-203 · HTTP POST /api/v3/pin]
 
@@ -97,7 +103,7 @@ else [COND=attention_ok]
 
   else [COND=time_or_certificate_invalid]
 
-    group S5a "Recover degraded time/certificate state"
+    group S5a "GRP_STATUS_HANDLE_TIME_OR_CERTIFICATE_DEGRADED"
       ESDC -> ESDC : block fiscalization until local condition is resolved\n[step=S5a.1]
       ESDC -> ESDC : expose notification to operator\n[step=S5a.2]
       ESIR --> OP : [step=S5a.3]\n[vals result=ReadinessResult(degraded)]
@@ -105,7 +111,7 @@ else [COND=attention_ok]
 
   else [COND=environment_refresh_requested]
 
-    group S5b "Refresh environment parameters"
+    group S5b "GRP_STATUS_REFRESH_ENVIRONMENT_PARAMETERS"
       ESIR -> ESDC : IF_SYS_ESDC_SERVICE.GetEnvironmentParameters() -> EnvironmentParametersResponse\n[step=S5b.1]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-204 · HTTP GET /api/v3/environment-parameters]
       ESDC --> ESIR : [step=S5b.1r]\n[vals result=EnvironmentParametersResponse(environmentName, endpoints)]
       ESIR --> OP : [step=S5b.2]\n[vals result=ReadinessResult(ready_with_environment_context)]
@@ -113,7 +119,7 @@ else [COND=attention_ok]
 
   else [COND=ready_without_recovery]
 
-    group S5c "System already ready"
+    group S5c "GRP_STATUS_CONFIRM_ALREADY_READY"
       ESIR --> OP : [step=S5c.1]\n[vals result=ReadinessResult(ready)]
     end
 

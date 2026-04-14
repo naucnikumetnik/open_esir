@@ -12,10 +12,6 @@ skinparam DefaultFontName Monospace
 
 actor "External Verifier\n(Customer / Inspector / App)" as EV
 
-box "Open Fiscal Core — System Components" #F3F3F3
-  boundary "ESIR" as ESIR <<component>>
-end box
-
 box "External Dependencies" #EEF5FF
   boundary "Public Verification\nService" as PV <<external>>
 end box
@@ -25,39 +21,37 @@ S_SYS_PUBLIC_VERIFICATION
 [semantics lifecycle_spine=true]
 end note
 
-note over ESIR, PV
+note over EV, PV
   Public verification is a separate public-facing flow.
-  It consumes a verification reference and returns
-  a machine-readable verified public view of the invoice.
+  Open Fiscal Core is not invoked at runtime in this scenario;
+  it only emitted the verification reference earlier during
+  invoice fiscalization and receipt generation.
 end note
 
-group S1 "Obtain verification reference"
-  alt [COND=reference_available_from_business_app]
-    EV -> ESIR : request verification reference\n[step=S1.1]
-    activate ESIR
-    ESIR --> EV : [step=S1.1r]\n[vals verificationUrl:VerificationUrl]
-    deactivate ESIR
-  else [COND=reference_available_from_printed_or_shared_receipt]
-    EV -> EV : read verificationUrl from receipt / link / QR-derived reference\n[step=S1.2]
+group S1 "GRP_VERIFICATION_OBTAIN_REFERENCE"
+  alt [COND=reference_available_from_printed_or_shared_receipt]
+    EV -> EV : read verificationUrl from receipt / link / QR-derived reference\n[step=S1.1]
+  else [COND=reference_available_from_shared_fiscal_output]
+    EV -> EV : recover verificationUrl from previously shared fiscal output or merchant-provided copy\n[step=S1.2]
   end
 end
 
 alt [COND=verification_reference_missing_or_malformed]
 
-  group S2a "Reject missing or malformed verification reference"
+  group S2a "GRP_VERIFICATION_REJECT_MALFORMED_REFERENCE"
     EV -> EV : stop verification attempt\n[step=S2a.1]
   end
 
 else [COND=verification_reference_present]
 
-  group S2 "Request public verification view"
+  group S2 "GRP_VERIFICATION_REQUEST_PUBLIC_VIEW"
     EV -> PV : IF_DEP_PUBLIC_VERIFICATION.GetInvoiceVerificationJson(verificationUrl:VerificationUrl) -> InvoiceVerificationResponse\n[step=S2.1]\n[connection use_port=P_EV_USE_PUBLIC_VERIFICATION; prov_port=P_PV_PROV_PUBLIC_VERIFICATION; conn=C_EV__PV__PUBLIC_VERIFICATION]
     activate PV
   end
 
   alt [COND=verification_ok]
 
-    group S3 "Return verified public machine-readable view"
+    group S3 "GRP_VERIFICATION_RETURN_VERIFIED_VIEW"
       PV --> EV : [step=S3.1]\n[vals result=InvoiceVerificationResponse(invoiceRequest, invoiceResult, journal, isValid)]
       deactivate PV
 
@@ -73,7 +67,7 @@ else [COND=verification_reference_present]
 
   else [COND=verification_unknown_or_not_found]
 
-    group S3a "Handle unknown or not-found reference"
+    group S3a "GRP_VERIFICATION_HANDLE_UNKNOWN_REFERENCE"
       PV --> EV : [step=S3a.1]\n[vals result=verification_not_found_or_invalid]
       deactivate PV
       EV -> EV : expose invalid / unknown verification outcome\n[step=S3a.2]
@@ -81,7 +75,7 @@ else [COND=verification_reference_present]
 
   else [COND=verification_service_unavailable]
 
-    group S3b "Handle temporary verification unavailability"
+    group S3b "GRP_VERIFICATION_HANDLE_TEMPORARY_UNAVAILABILITY"
       PV --> EV : [step=S3b.1]\n[vals result=verification_service_unavailable]
       deactivate PV
       EV -> EV : expose temporary verification failure\n[step=S3b.2]

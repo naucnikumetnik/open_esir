@@ -37,19 +37,19 @@ note over ESIR, ESDC
   The selected SDC path returns InvoiceResult.
 end note
 
-group S1 "Business application submits invoice for fiscalization"
+group S1 "GRP_FISCALIZE_RECEIVE_INVOICE_REQUEST"
   BA -> ESIR : IF_SYS_ESIR_SERVICE.Fiscalize(request:InvoiceRequest) -> InvoiceResult\n[step=S1.1]\n[connection use_port=P_BA_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_BA__ESIR__ESIR_SERVICE]
   activate ESIR
 end
 
-group S2 "ESIR validates and prepares invoice request"
+group S2 "GRP_FISCALIZE_VALIDATE_AND_PREPARE_REQUEST"
   ESIR -> ESIR : validate invoice fields, buyer data, payment structure,\nmandatory elements and request consistency\n[step=S2.1]
   ESIR -> ESIR : normalize and prepare InvoiceRequest for SDC path\n[step=S2.2]
 end
 
 alt [COND=configured_sdc_mode == V_SDC]
 
-  group S3a "Fiscalize via V-SDC"
+  group S3a "GRP_FISCALIZE_ROUTE_ONLINE"
     ESIR -> VSDC : IF_DEP_TAXCORE_VSDC.CreateInvoice(request:InvoiceRequest) -> InvoiceResult\n[step=S3a.1]\n[connection use_port=P_ESIR_USE_TAXCORE_VSDC; prov_port=P_VSDC_PROV_TAXCORE_VSDC; conn=C_ESIR__VSDC__TAXCORE_VSDC]\n[CTR-001 · HTTPS POST /api/v3/invoices · client certificate + PAC]
     activate VSDC
 
@@ -64,7 +64,7 @@ alt [COND=configured_sdc_mode == V_SDC]
 
 else [COND=configured_sdc_mode == E_SDC]
 
-  group S3b "Fiscalize via E-SDC"
+  group S3b "GRP_FISCALIZE_ROUTE_LOCAL"
     ESIR -> ESDC : IF_SYS_ESDC_SERVICE.CreateInvoice(request:InvoiceRequest) -> InvoiceResult\n[step=S3b.1]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]\n[CTR-001 · HTTP POST /api/v3/invoices · local]
     activate ESDC
 
@@ -97,7 +97,7 @@ else [COND=configured_sdc_mode == E_SDC]
 
 end
 
-group S4 "ESIR returns fiscalization result to business application"
+group S4 "GRP_FISCALIZE_RETURN_RESULT"
   alt [COND=fiscalization_failed]
     ESIR --> BA : [step=S4.1err]\n[vals error=ValidationErrorResponse | GENERAL_STATUS_CODE | SE_APDU_STATUS]
     deactivate ESIR

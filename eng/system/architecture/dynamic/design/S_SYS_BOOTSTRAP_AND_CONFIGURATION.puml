@@ -38,21 +38,21 @@ note over ESDC, TCB
   S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE.
 end note
 
-group S1 "Provisioning trigger starts bootstrap"
+group S1 "GRP_BOOTSTRAP_START_BOOTSTRAP"
   PT -> ESIR : IF_SYS_ESIR_SERVICE.Bootstrap() -> BootstrapResult\n[step=S1.1]\n[connection use_port=P_PT_USE_ESIR_SERVICE; prov_port=P_ESIR_PROV_ESIR_SERVICE; conn=C_PT__ESIR__ESIR_SERVICE]
   activate ESIR
   ESIR -> ESDC : IF_SYS_ESDC_SERVICE.BootstrapOrRefresh() -> BootstrapResult\n[step=S1.2]\n[connection use_port=P_ESIR_USE_ESDC_SERVICE; prov_port=P_ESDC_PROV_ESDC_SERVICE; conn=C_ESIR__ESDC__ESDC_SERVICE]
   activate ESDC
 end
 
-group S2 "Resolve backend context"
+group S2 "GRP_BOOTSTRAP_RESOLVE_BACKEND_CONTEXT"
   ESDC -> ESDC : resolve backend base URL\n[step=S2.1]
   ESDC -> PKI : read client certificate context\n[step=S2.2]
 end
 
 alt [COND=no_valid_taxcore_token]
 
-  group S3 "Acquire authentication token"
+  group S3 "GRP_BOOTSTRAP_ACQUIRE_AUTH_TOKEN"
     ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.RequestAuthenticationToken() -> AuthenticationTokenResponse\n[step=S3.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-028 · HTTPS GET /api/v3/sdc/token · client certificate]
     activate TCB
     TCB --> ESDC : [step=S3.1r]\n[vals result=AuthenticationTokenResponse(token, expiresAt)]
@@ -62,13 +62,13 @@ alt [COND=no_valid_taxcore_token]
 
 else [COND=valid_taxcore_token_present]
 
-  group S3a "Reuse cached authentication token"
+  group S3a "GRP_BOOTSTRAP_REUSE_CACHED_AUTH_TOKEN"
     ESDC -> ESDC : keep cached token\n[step=S3a.1]
   end
 
 end
 
-group S4 "Read shared TaxCore bootstrap data"
+group S4 "GRP_BOOTSTRAP_READ_SHARED_TAXCORE_DATA"
   ESDC -> TCS : IF_DEP_TAXCORE_SHARED.Environments() -> EnvironmentDescriptor[]\n[step=S4.1]\n[connection use_port=P_ESDC_USE_TAXCORE_SHARED; prov_port=P_TCS_PROV_TAXCORE_SHARED; conn=C_ESDC__TCS__TAXCORE_SHARED]\n[CTR-101 · HTTPS GET /api/v3/environments]
   activate TCS
   TCS --> ESDC : [step=S4.1r]\n[vals result=EnvironmentDescriptor[](name, url)]
@@ -84,7 +84,7 @@ group S4 "Read shared TaxCore bootstrap data"
   deactivate TCS
 end
 
-group S5 "Pull initialization commands"
+group S5 "GRP_BOOTSTRAP_PULL_INITIALIZATION_COMMANDS"
   ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.GetInitializationCommands() -> Command[]\n[step=S5.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-029A · HTTPS GET /api/v3/sdc/commands · TaxCoreAuthenticationToken]
   activate TCB
   TCB --> ESDC : [step=S5.1r]\n[vals result=Command[](commandId, type, payload, uid)]
@@ -93,7 +93,7 @@ end
 
 alt [COND=commands_present]
 
-  group S6 "Apply and acknowledge commands"
+  group S6 "GRP_BOOTSTRAP_APPLY_AND_ACKNOWLEDGE_COMMANDS"
     loop [for each command]
       ESDC -> ESDC : apply command payload\n[step=S6.1]
       alt [COND=command_applied_successfully]
@@ -107,13 +107,13 @@ alt [COND=commands_present]
 
 else [COND=no_commands_present]
 
-  group S6a "Continue without initialization commands"
+  group S6a "GRP_BOOTSTRAP_CONTINUE_WITHOUT_INITIALIZATION_COMMANDS"
     ESDC -> ESDC : continue with shared bootstrap data only\n[step=S6a.1]
   end
 
 end
 
-group S7 "Persist readiness state"
+group S7 "GRP_BOOTSTRAP_PERSIST_READINESS_STATE"
   ESDC -> ESDC : persist bootstrap state\n[step=S7.1]
   ESDC -> ESDC : derive readiness\n[step=S7.2]
   ESDC --> ESIR : [step=S7.3]\n[vals result=BootstrapResult(ready | degraded | pending_operator_action)]

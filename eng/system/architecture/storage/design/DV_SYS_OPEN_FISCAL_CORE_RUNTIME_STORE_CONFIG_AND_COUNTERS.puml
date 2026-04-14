@@ -1,0 +1,329 @@
+@startuml
+title DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS - Data View (logical)
+
+hide empty members
+skinparam classAttributeIconSize 0
+skinparam Shadowing false
+
+' Conventions for parser (deterministic):
+' - IDs: ST_* store, E_* entity, AP_* access_pattern, BND_* binding, CORR_* correspondence
+' - Defaults: payload.format=json, payload.content_type=application/json unless overridden
+' - Stored record names under OFC_STORAGE.* are internal logical record shapes for this slice
+
+note top
+  Focused slice for bootstrap, configuration state, hosted coordination,
+  and persistent counter continuity.
+
+  Cross-slice entity dependencies referenced here but defined primarily in
+  DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT:
+  - E_BACKEND_AUTH_CONTEXT
+  - E_BACKEND_COMMAND_RECORD
+  - E_BACKEND_COMMAND_INDEX
+  - E_READINESS_RECOVERY_SNAPSHOT
+end note
+
+package "Stores" {
+  class "ST_SYSTEM_CONFIGURATION_STATE" as ST_SYSTEM_CONFIGURATION_STATE {
+    kind=logical_store
+    owner=DEP_BOOTSTRAP
+    boundary=internal
+    access=record_store
+    durability=durable
+    consistency=strong
+    gov.allowed_writers=DEP_BOOTSTRAP+DEP_REMOTE_COORDINATION
+    gov.allowed_readers=DEP_BOOTSTRAP+DEP_ESIR+DEP_ESDC+DEP_ESIR_CLOUD+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended_local_required_cloud
+    gov.retention_basis=retain_until_replaced_or_tenant_deprovision
+    gov.delete_policy=replace_or_deprovision
+    gov.exportability=restricted_operator_support
+  }
+
+  class "ST_COUNTER_STATE" as ST_COUNTER_STATE {
+    kind=logical_store
+    owner=DEP_ESIR+DEP_ESIR_CLOUD
+    boundary=internal
+    access=record_store
+    durability=durable
+    consistency=strong
+    gov.allowed_writers=DEP_ESIR+DEP_ESIR_CLOUD
+    gov.allowed_readers=DEP_ESIR+DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended_local_required_cloud
+    gov.retention_basis=retain_for_fiscal_continuity
+    gov.delete_policy=replace_only_via_controlled_reset
+    gov.exportability=not_operator_exported
+  }
+}
+
+package "Entities - configuration and bootstrap" {
+  class "E_APPROVED_CONFIGURATION_RECORD" as E_APPROVED_CONFIGURATION_RECORD {
+    store=ST_SYSTEM_CONFIGURATION_STATE
+    owner=DEP_BOOTSTRAP
+    mutability=versioned
+    pk=OFC_STORAGE.ConfigurationScopeKey
+    payload=OFC_STORAGE.ApprovedConfigurationRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_BOOTSTRAP+DEP_REMOTE_COORDINATION
+    gov.allowed_readers=DEP_BOOTSTRAP+DEP_ESIR+DEP_ESDC+DEP_ESIR_CLOUD+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended_local_required_cloud
+    gov.retention_basis=retain_until_replaced_by_approved_config
+    gov.delete_policy=replace_or_tenant_deprovision
+    gov.exportability=restricted_operator_support
+    inv.required=true
+    inv.approved_source_required=true
+  }
+
+  class "E_ENVIRONMENT_BINDING_RECORD" as E_ENVIRONMENT_BINDING_RECORD {
+    store=ST_SYSTEM_CONFIGURATION_STATE
+    owner=DEP_BOOTSTRAP
+    mutability=mutable
+    pk=OFC_STORAGE.EnvironmentBindingKey
+    payload=OFC_STORAGE.EnvironmentBindingRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_BOOTSTRAP+DEP_REMOTE_COORDINATION
+    gov.allowed_readers=DEP_BOOTSTRAP+DEP_ESIR+DEP_ESDC+DEP_ESIR_CLOUD+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended_local_required_cloud
+    gov.retention_basis=retain_current_and_last_known_good_binding
+    gov.delete_policy=replace_only
+    gov.exportability=restricted_operator_support
+    inv.single_active_binding_per_scope=true
+  }
+
+  class "E_SHARED_TAXCORE_SNAPSHOT_RECORD" as E_SHARED_TAXCORE_SNAPSHOT_RECORD {
+    store=ST_SYSTEM_CONFIGURATION_STATE
+    owner=DEP_BOOTSTRAP
+    mutability=mutable
+    pk=OFC_STORAGE.SharedSnapshotKey
+    payload=OFC_STORAGE.SharedTaxCoreSnapshotRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_BOOTSTRAP
+    gov.allowed_readers=DEP_BOOTSTRAP+DEP_ESIR+DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended
+    gov.retention_basis=retain_latest_snapshot_per_environment
+    gov.delete_policy=replace_or_expire
+    gov.exportability=restricted_operator_support
+    inv.source_contracts=Environments+Configuration+TaxRates+EncryptionCertificate
+  }
+
+  class "E_HOSTED_COORDINATION_RECORD" as E_HOSTED_COORDINATION_RECORD {
+    store=ST_SYSTEM_CONFIGURATION_STATE
+    owner=DEP_REMOTE_COORDINATION
+    mutability=mutable
+    pk=OFC_STORAGE.HostedTenantKey
+    payload=OFC_STORAGE.HostedCoordinationRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_REMOTE_COORDINATION
+    gov.allowed_readers=DEP_REMOTE_COORDINATION+DEP_ESIR_CLOUD+DEP_BOOTSTRAP
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_while_hosted_access_is_provisioned
+    gov.delete_policy=tenant_deprovision_or_rebind
+    gov.exportability=not_operator_exported
+    inv.hosted_access_only=true
+  }
+}
+
+package "Entities - counters" {
+  class "E_RECEIPT_SEQUENCE_COUNTER_STATE" as E_RECEIPT_SEQUENCE_COUNTER_STATE {
+    store=ST_COUNTER_STATE
+    owner=DEP_ESIR+DEP_ESIR_CLOUD
+    mutability=mutable
+    pk=OFC_STORAGE.CounterScopeKey
+    payload=OFC_STORAGE.CounterStateRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_ESIR+DEP_ESIR_CLOUD
+    gov.allowed_readers=DEP_ESIR+DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended_local_required_cloud
+    gov.retention_basis=retain_for_invoice_number_and_counter_continuity
+    gov.delete_policy=controlled_reset_only
+    gov.exportability=not_operator_exported
+    inv.monotonic_non_decreasing=true
+    inv.scope_is_environment_specific=true
+  }
+}
+
+package "AccessPatterns" {
+  class "AP_RESTORE_BOOTSTRAP_CONTEXT" as AP_RESTORE_BOOTSTRAP_CONTEXT {
+    owner=DEP_BOOTSTRAP
+    op=bootstrap_restore_context
+    scenario=S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    steps=S1.2+S2.1+S3a.1
+    read.1=E_APPROVED_CONFIGURATION_RECORD:by_pk:strong_optional
+    read.2=E_ENVIRONMENT_BINDING_RECORD:by_pk:strong_optional
+    read.3=E_BACKEND_AUTH_CONTEXT:by_pk:strong_optional
+    read.4=E_READINESS_RECOVERY_SNAPSHOT:by_pk:strong_optional
+  }
+
+  class "AP_CACHE_BOOTSTRAP_REFRESH" as AP_CACHE_BOOTSTRAP_REFRESH {
+    owner=DEP_BOOTSTRAP
+    op=bootstrap_cache_refresh
+    scenario=S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    steps=S3.2+S4.1+S4.2+S4.3+S4.4+S7.1
+    read.1=E_APPROVED_CONFIGURATION_RECORD:by_pk:strong_optional
+    write.1=E_BACKEND_AUTH_CONTEXT:upsert
+    write.2=E_SHARED_TAXCORE_SNAPSHOT_RECORD:upsert
+    write.3=E_ENVIRONMENT_BINDING_RECORD:upsert
+    write.4=E_READINESS_RECOVERY_SNAPSHOT:upsert
+  }
+
+  class "AP_APPLY_INITIALIZATION_COMMANDS" as AP_APPLY_INITIALIZATION_COMMANDS {
+    owner=DEP_BOOTSTRAP
+    op=bootstrap_apply_initialization_commands
+    scenario=S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    steps=S5.1+S6.1+S6.2+S6.3+S6.4
+    read.1=E_BACKEND_COMMAND_INDEX:by_pk:strong_optional
+    write.N1=E_BACKEND_COMMAND_RECORD:insert_or_replace
+    write.1=E_BACKEND_COMMAND_INDEX:upsert
+    write.2=E_APPROVED_CONFIGURATION_RECORD:update_when_command_applies
+    write.3=E_READINESS_RECOVERY_SNAPSHOT:update
+  }
+
+  class "AP_SYNC_HOSTED_COORDINATION_CONTEXT" as AP_SYNC_HOSTED_COORDINATION_CONTEXT {
+    owner=DEP_REMOTE_COORDINATION
+    op=sync_hosted_coordination_context
+    scenario=S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    steps=S1.1+S1.2+S7.3+S7.4
+    read.1=E_HOSTED_COORDINATION_RECORD:by_pk:strong_optional
+    read.2=E_ENVIRONMENT_BINDING_RECORD:by_pk:strong_optional
+    write.1=E_HOSTED_COORDINATION_RECORD:upsert
+    write.2=E_ENVIRONMENT_BINDING_RECORD:update_when_hosted_context_changes
+  }
+
+  class "AP_PERSIST_COUNTER_STATE" as AP_PERSIST_COUNTER_STATE {
+    owner=DEP_ESIR+DEP_ESIR_CLOUD
+    op=sync_counter_state_after_fiscalization
+    scenario=S_SYS_FISCALIZE_INVOICE
+    steps=S2.2+S3a.1r+S3b.7+S4.1r
+    read.1=E_RECEIPT_SEQUENCE_COUNTER_STATE:by_pk:strong_optional
+    write.1=E_RECEIPT_SEQUENCE_COUNTER_STATE:upsert
+    policy.counter_monotonic=true
+  }
+}
+
+package "Bindings" {
+  class "BND_EMBEDDED_LOCAL_FS" as BND_EMBEDDED_LOCAL_FS {
+    kind=tenant_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+
+    fs.root.configuration=/ofc/config
+    fs.root.counter=/ofc/counters
+
+    fs.path.approved_configuration={configuration}/approved_configuration.json
+    fs.path.environment_binding={configuration}/environment_binding.json
+    fs.path.shared_taxcore_snapshot={configuration}/shared_taxcore_snapshot.json
+    fs.path.counter_state={counter}/receipt_sequence_counter_state.json
+
+    atomicity.write_policy=temp_write_then_rename
+
+    apply=[E_APPROVED_CONFIGURATION_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_SHARED_TAXCORE_SNAPSHOT_RECORD,E_RECEIPT_SEQUENCE_COUNTER_STATE]
+  }
+
+  class "BND_LOCAL_SERVICE_LOCAL_FS" as BND_LOCAL_SERVICE_LOCAL_FS {
+    kind=tenant_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST+PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+
+    fs.root.configuration=/srv/ofc/config
+    fs.root.counter=/srv/ofc/counters
+
+    fs.path.approved_configuration={configuration}/approved_configuration.json
+    fs.path.environment_binding={configuration}/environment_binding.json
+    fs.path.shared_taxcore_snapshot={configuration}/shared_taxcore_snapshot.json
+    fs.path.counter_state={counter}/receipt_sequence_counter_state.json
+
+    atomicity.write_policy=temp_write_then_rename
+
+    apply=[E_APPROVED_CONFIGURATION_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_SHARED_TAXCORE_SNAPSHOT_RECORD,E_RECEIPT_SEQUENCE_COUNTER_STATE]
+  }
+
+  class "BND_HOSTED_ACCESS_EDGE_LOCAL_FS" as BND_HOSTED_ACCESS_EDGE_LOCAL_FS {
+    kind=tenant_edge_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+
+    fs.root.configuration=/srv/ofc_edge/config
+
+    fs.path.approved_configuration={configuration}/approved_configuration.json
+    fs.path.environment_binding={configuration}/environment_binding.json
+    fs.path.shared_taxcore_snapshot={configuration}/shared_taxcore_snapshot.json
+
+    atomicity.write_policy=temp_write_then_rename
+
+    apply=[E_APPROVED_CONFIGURATION_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_SHARED_TAXCORE_SNAPSHOT_RECORD]
+  }
+
+  class "BND_HOSTED_ACCESS_CLOUD_MANAGED" as BND_HOSTED_ACCESS_CLOUD_MANAGED {
+    kind=cloud_managed_store
+    substrate=managed_namespace
+    path_policy=tenant_partitioned_namespace
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+
+    cloud.partition=tenant_id
+    cloud.namespace.configuration=tenant_config
+    cloud.namespace.counter=counters
+
+    cloud.path.approved_configuration={configuration}/approved_configuration.json
+    cloud.path.environment_binding={configuration}/environment_binding.json
+    cloud.path.shared_taxcore_snapshot={configuration}/shared_taxcore_snapshot.json
+    cloud.path.hosted_coordination={configuration}/hosted_coordination.json
+    cloud.path.counter_state={counter}/receipt_sequence_counter_state.json
+
+    atomicity.write_policy=conditional_upsert_or_service_transaction
+
+    apply=[E_APPROVED_CONFIGURATION_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_SHARED_TAXCORE_SNAPSHOT_RECORD,E_HOSTED_COORDINATION_RECORD,E_RECEIPT_SEQUENCE_COUNTER_STATE]
+  }
+}
+
+package "Correspondences" {
+  class "CORR_APPROVED_CONFIGURATION_PAYLOAD" as CORR_APPROVED_CONFIGURATION_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.ApprovedConfigurationRecord
+    to=E_APPROVED_CONFIGURATION_RECORD
+  }
+
+  class "CORR_ENVIRONMENT_BINDING_PAYLOAD" as CORR_ENVIRONMENT_BINDING_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.EnvironmentBindingRecord
+    to=E_ENVIRONMENT_BINDING_RECORD
+  }
+
+  class "CORR_SHARED_SNAPSHOT_PAYLOAD" as CORR_SHARED_SNAPSHOT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.SharedTaxCoreSnapshotRecord
+    to=E_SHARED_TAXCORE_SNAPSHOT_RECORD
+  }
+
+  class "CORR_HOSTED_COORDINATION_PAYLOAD" as CORR_HOSTED_COORDINATION_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.HostedCoordinationRecord
+    to=E_HOSTED_COORDINATION_RECORD
+  }
+
+  class "CORR_COUNTER_STATE_PAYLOAD" as CORR_COUNTER_STATE_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.CounterStateRecord
+    to=E_RECEIPT_SEQUENCE_COUNTER_STATE
+  }
+
+  class "CORR_OP_BOOTSTRAP_REFRESH_WRITES" as CORR_OP_BOOTSTRAP_REFRESH_WRITES {
+    kind=operation_writes_entities
+    from=AP_CACHE_BOOTSTRAP_REFRESH
+    to=[E_BACKEND_AUTH_CONTEXT,E_SHARED_TAXCORE_SNAPSHOT_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_READINESS_RECOVERY_SNAPSHOT]
+  }
+
+  class "CORR_OP_APPLY_INIT_COMMANDS" as CORR_OP_APPLY_INIT_COMMANDS {
+    kind=operation_writes_entities
+    from=AP_APPLY_INITIALIZATION_COMMANDS
+    to=[E_BACKEND_COMMAND_RECORD,E_BACKEND_COMMAND_INDEX,E_APPROVED_CONFIGURATION_RECORD,E_READINESS_RECOVERY_SNAPSHOT]
+  }
+
+  class "CORR_OP_PERSIST_COUNTERS" as CORR_OP_PERSIST_COUNTERS {
+    kind=operation_writes_entities
+    from=AP_PERSIST_COUNTER_STATE
+    to=[E_RECEIPT_SEQUENCE_COUNTER_STATE]
+  }
+}
+
+@enduml

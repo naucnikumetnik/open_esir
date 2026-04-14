@@ -30,7 +30,7 @@ note over ESDC, TCB
   and audit package submission.
 end note
 
-group S1 "Ensure backend authentication capability"
+group S1 "GRP_BACKEND_SYNC_ENSURE_AUTHENTICATION_CAPABILITY"
   ESDC -> ESDC : check cached token validity\n[step=S1.1]
 
   alt [COND=no_valid_taxcore_token]
@@ -47,7 +47,7 @@ group S1 "Ensure backend authentication capability"
   end
 end
 
-group S2 "Announce online status"
+group S2 "GRP_BACKEND_SYNC_ANNOUNCE_ONLINE_STATUS"
   ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyOnlineStatus(body:BooleanFlagBody) -> Command[]\n[step=S2.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-302 · HTTPS PUT /api/v3/sdc/status · TaxCoreAuthenticationToken]
   activate TCB
   TCB --> ESDC : [step=S2.1r]\n[vals result=Command[](commandId, type, payload, uid)]
@@ -56,7 +56,7 @@ end
 
 alt [COND=commands_received_from_online_status]
 
-  group S3 "Process commands received with online status"
+  group S3 "GRP_BACKEND_SYNC_PROCESS_STATUS_COMMANDS"
     loop [for each command]
       ESDC -> ESDC : apply command payload\n[step=S3.1]
 
@@ -71,7 +71,7 @@ alt [COND=commands_received_from_online_status]
 
 else [COND=no_commands_received_from_online_status]
 
-  group S3a "Continue without commands from online status"
+  group S3a "GRP_BACKEND_SYNC_CONTINUE_WITHOUT_STATUS_COMMANDS"
     ESDC -> ESDC : keep current backend-aligned state\n[step=S3a.1]
   end
 
@@ -79,7 +79,7 @@ end
 
 alt [COND=explicit_initialization_refresh_required]
 
-  group S4 "Pull initialization commands explicitly"
+  group S4 "GRP_BACKEND_SYNC_PULL_INITIALIZATION_COMMANDS"
     ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.GetInitializationCommands() -> Command[]\n[step=S4.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-304 · HTTPS GET /api/v3/sdc/commands · TaxCoreAuthenticationToken]
     activate TCB
     TCB --> ESDC : [step=S4.1r]\n[vals result=Command[](commandId, type, payload, uid)]
@@ -103,7 +103,7 @@ end
 
 alt [COND=audit_package_pending_and_connectivity_available]
 
-  group S5 "Submit pending audit package"
+  group S5 "GRP_BACKEND_SYNC_SUBMIT_AUDIT_PACKAGE"
     ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditPackage(data:AuditPackage) -> AuditDataStatus\n[step=S5.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-305 · HTTPS POST /api/v3/sdc/audit · TaxCoreAuthenticationToken]
     activate TCB
     TCB --> ESDC : [step=S5.1r]\n[vals result=AuditDataStatus(status, commands)]
@@ -133,13 +133,13 @@ alt [COND=audit_package_pending_and_connectivity_available]
 
 else [COND=no_audit_package_pending_or_offline]
 
-  group S5a "Skip audit submission"
+  group S5a "GRP_BACKEND_SYNC_SKIP_AUDIT_SUBMISSION"
     ESDC -> ESDC : keep current audit backlog state\n[step=S5a.1]
   end
 
 end
 
-group S6 "Close backend sync outcome"
+group S6 "GRP_BACKEND_SYNC_CLOSE_SYNC_OUTCOME"
   ESDC -> ESDC : derive backend-sync state\n[step=S6.1]
   ESDC -> ESDC : expose outcome as synced | commands_pending | retry_pending | degraded\n[step=S6.2]
 end

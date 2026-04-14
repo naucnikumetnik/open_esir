@@ -1,0 +1,153 @@
+@startuml
+title Open Fiscal Core Deployment — local service variant
+
+hide footbox
+skinparam Shadowing false
+skinparam PackageStyle rectangle
+skinparam DefaultFontName Monospace
+skinparam ComponentStyle rectangle
+
+package "Z_TENANT_SITE — Tenant site / local service deployment" as Z_TENANT_SITE <<zone>> {
+
+  node "N_BUSINESS_DEVICE\nPOS / ERP client / cashier device" as N_BUSINESS_DEVICE <<physical_machine>> {
+    artifact "RB_BUSINESS_APP_RUNTIME\nBusiness application runtime" as RB_BUSINESS_APP_RUNTIME <<runtime_boundary,process_space,external>>
+  }
+
+  node "N_OPERATOR_DEVICE\nOperator workstation / service console" as N_OPERATOR_DEVICE <<physical_machine,external,optional>> {
+    artifact "RB_OPERATOR_RUNTIME\nOperator runtime" as RB_OPERATOR_RUNTIME <<runtime_boundary,process_space,external,optional>>
+  }
+
+  node "N_FISCAL_HOST\nLocal fiscal host\n(local PC / mini-PC / branch server)" as N_FISCAL_HOST <<physical_machine>> {
+
+    artifact "RB_OFC_LOCAL_SERVICE_RUNTIME\nOpen Fiscal Core local service runtime" as RB_OFC_LOCAL_SERVICE_RUNTIME <<runtime_boundary,process_space>> {
+      component "DEP_BOOTSTRAP\nBootstrap" as DEP_BOOTSTRAP <<hosted_component>>
+      component "DEP_ESIR\nESIR" as DEP_ESIR <<hosted_component>>
+      component "DEP_ESDC\nE-SDC" as DEP_ESDC <<hosted_component>>
+      component "DEP_STATUS_RECOVERY\nStatusAndOperatorRecovery" as DEP_STATUS_RECOVERY <<hosted_component>>
+      component "DEP_AUDIT_PROOF\nAuditAndProofLifecycle" as DEP_AUDIT_PROOF <<hosted_component>>
+      component "DEP_EXPORT\nLocalAuditExport" as DEP_EXPORT <<hosted_component,optional>>
+    }
+
+    folder "FS_OFC_CONFIG\nmanaged config storage" as FS_OFC_CONFIG <<storage>>
+    folder "FS_LOCAL_AUDIT_JOURNAL\nlocal audit journal" as FS_LOCAL_AUDIT_JOURNAL <<storage>>
+    folder "FS_PROOF_STORE\nproof / verification evidence" as FS_PROOF_STORE <<storage>>
+    folder "FS_COUNTER_STORE\nreceipt counters / sequence state" as FS_COUNTER_STORE <<storage>>
+    folder "FS_COMMAND_STATE\nbackend command state" as FS_COMMAND_STATE <<storage>>
+    folder "FS_EXPORT_STAGING\nexport staging area" as FS_EXPORT_STAGING <<storage,optional>>
+
+    interface "EP_ESIR_PROV_ESIR_SERVICE_LOCAL\nprovider=ESIR Service\ncm=CI_BIND_EP_ESIR_PROV_ESIR_SERVICE_LOCAL" as EP_ESIR_PROV_ESIR_SERVICE_LOCAL <<endpoint>>
+    interface "EP_ESDC_PROV_ESDC_SERVICE_LOCAL\nprovider=E-SDC Service\ncm=CI_BIND_EP_ESDC_PROV_ESDC_SERVICE_LOCAL" as EP_ESDC_PROV_ESDC_SERVICE_LOCAL <<endpoint>>
+
+    N_FISCAL_HOST o-- RB_OFC_LOCAL_SERVICE_RUNTIME
+    N_FISCAL_HOST o-- FS_OFC_CONFIG
+    N_FISCAL_HOST o-- FS_LOCAL_AUDIT_JOURNAL
+    N_FISCAL_HOST o-- FS_PROOF_STORE
+    N_FISCAL_HOST o-- FS_COUNTER_STORE
+    N_FISCAL_HOST o-- FS_COMMAND_STATE
+    N_FISCAL_HOST o-- FS_EXPORT_STAGING
+
+    RB_OFC_LOCAL_SERVICE_RUNTIME o-- EP_ESIR_PROV_ESIR_SERVICE_LOCAL
+    RB_OFC_LOCAL_SERVICE_RUNTIME o-- EP_ESDC_PROV_ESDC_SERVICE_LOCAL
+  }
+
+    'Local service variant separates business application
+    'from Open Fiscal Core runtime at deployment level.
+    'Concrete production configs split same_host loopback-only
+    'and site_lan local-network-only BA -> ESIR access.
+    'ESIR -> E-SDC remains same-host and should usually stay
+    'in_process, IPC, or loopback inside the fiscal host.
+
+  node "N_SE_DEVICE\nSecurity Element access device" as N_SE_DEVICE <<other,external>> {
+    artifact "DEP_EXT_SE\nEXT_SECURITY_ELEMENT" as DEP_EXT_SE <<deployment,service,external>>
+    interface "EP_SE_PROV_SECURE_ELEMENT_LOCAL\nprovider=Secure Element\ncm=CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL" as EP_SE_PROV_SECURE_ELEMENT_LOCAL <<endpoint>>
+    DEP_EXT_SE o-- EP_SE_PROV_SECURE_ELEMENT_LOCAL
+  }
+
+  node "N_PKI_CONTEXT\nPKI Applet / Client Certificate context" as N_PKI_CONTEXT <<other,external>> {
+    artifact "DEP_EXT_PKI_CONTEXT\nEXT_PKI_CLIENT_CONTEXT" as DEP_EXT_PKI_CONTEXT <<deployment,service,external>>
+    interface "EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL\nprovider=PKI Client Context\ncm=CI_BIND_EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL" as EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL <<endpoint>>
+    DEP_EXT_PKI_CONTEXT o-- EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL
+  }
+
+  node "N_REMOVABLE_MEDIA\nUSB / SD / removable medium" as N_REMOVABLE_MEDIA <<other,external,optional>> {
+    artifact "DEP_EXT_REMOVABLE_MEDIA\nEXT_REMOVABLE_MEDIA_IO" as DEP_EXT_REMOVABLE_MEDIA <<deployment,service,external,optional>>
+    interface "EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL\nprovider=Removable Media I/O\ncm=CI_BIND_EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL" as EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL <<endpoint,optional>>
+    DEP_EXT_REMOVABLE_MEDIA o-- EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL
+  }
+}
+
+package "Z_TAXCORE_EXTERNAL — External fiscal / tax services" as Z_TAXCORE_EXTERNAL <<zone>> {
+
+  node "N_VSDC\nV-SDC / TaxCore Cloud" as N_VSDC <<cloud_service,external>> {
+    artifact "DEP_EXT_VSDC\nEXT_VSDC" as DEP_EXT_VSDC <<deployment,service,external>>
+    interface "EP_VSDC_PROV_TAXCORE_VSDC_REMOTE\nprovider=TaxCore V-SDC\ncm=CI_BIND_EP_VSDC_PROV_TAXCORE_VSDC_REMOTE" as EP_VSDC_PROV_TAXCORE_VSDC_REMOTE <<endpoint>>
+    N_VSDC o-- DEP_EXT_VSDC
+    DEP_EXT_VSDC o-- EP_VSDC_PROV_TAXCORE_VSDC_REMOTE
+  }
+
+  node "N_TAXCORE_SHARED\nTaxCore.API Shared" as N_TAXCORE_SHARED <<cloud_service,external>> {
+    artifact "DEP_EXT_TCS\nEXT_TAXCORE_SHARED" as DEP_EXT_TCS <<deployment,service,external>>
+    interface "EP_TCS_PROV_TAXCORE_SHARED_REMOTE\nprovider=TaxCore Shared\ncm=CI_BIND_EP_TCS_PROV_TAXCORE_SHARED_REMOTE" as EP_TCS_PROV_TAXCORE_SHARED_REMOTE <<endpoint>>
+    N_TAXCORE_SHARED o-- DEP_EXT_TCS
+    DEP_EXT_TCS o-- EP_TCS_PROV_TAXCORE_SHARED_REMOTE
+  }
+
+  node "N_TAXCORE_BACKEND\nTaxCore Backend (E-SDC API)" as N_TAXCORE_BACKEND <<cloud_service,external>> {
+    artifact "DEP_EXT_TCB\nEXT_TAXCORE_ESDC_BACKEND" as DEP_EXT_TCB <<deployment,service,external>>
+    interface "EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE\nprovider=TaxCore E-SDC Backend\ncm=CI_BIND_EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE" as EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE <<endpoint>>
+    N_TAXCORE_BACKEND o-- DEP_EXT_TCB
+    DEP_EXT_TCB o-- EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE
+  }
+}
+
+  'Local service deployment variant.
+  'Business application and Open Fiscal Core are separated
+  'at runtime and may run on different tenant-local nodes,
+  'while secure-element access, local journaling, backend sync,
+  'and export remain local to the tenant site.
+
+' -------------------------
+' COMM PATHS (CP_*)
+' -------------------------
+RB_BUSINESS_APP_RUNTIME --> EP_ESIR_PROV_ESIR_SERVICE_LOCAL : CP_BA__ESIR__ESIR_SERVICE_LOCAL_SERVICE | local_network | loopback / lan
+RB_OPERATOR_RUNTIME --> EP_ESIR_PROV_ESIR_SERVICE_LOCAL : CP_OP__ESIR__ESIR_SERVICE_LOCAL_SERVICE | local_network | loopback / lan
+RB_OFC_LOCAL_SERVICE_RUNTIME --> EP_ESDC_PROV_ESDC_SERVICE_LOCAL : CP_ESIR__ESDC__ESDC_SERVICE_LOCAL_SERVICE | same_host | in_process / ipc / loopback
+N_FISCAL_HOST --> N_SE_DEVICE : CP_ESDC__SE__SECURE_ELEMENT_LOCAL_SERVICE | local_device | device_local
+N_FISCAL_HOST --> N_PKI_CONTEXT : CP_ESDC__PKI__CLIENT_CERT_CONTEXT_LOCAL_SERVICE | local_device | local_api / applet
+N_FISCAL_HOST --> N_TAXCORE_SHARED : CP_ESDC__TCS__TAXCORE_SHARED_LOCAL_SERVICE | network | remote_api
+N_FISCAL_HOST --> N_VSDC : CP_ESIR__VSDC__TAXCORE_VSDC_LOCAL_SERVICE | network | remote_api
+N_FISCAL_HOST --> N_TAXCORE_BACKEND : CP_ESDC__TCB__TAXCORE_ESDC_BACKEND_LOCAL_SERVICE | network | remote_api
+N_FISCAL_HOST --> N_REMOVABLE_MEDIA : CP_ESDC__MEDIA__REMOVABLE_MEDIA_IO_LOCAL_SERVICE | local_device | filesystem / removable_media
+
+' -------------------------
+' LOCAL STORAGE BINDINGS
+' -------------------------
+DEP_BOOTSTRAP ..> FS_OFC_CONFIG : CB_BOOTSTRAP__FS_OFC_CONFIG_LOCAL_SERVICE | transport=local_fs | root=config
+DEP_ESIR ..> FS_COUNTER_STORE : CB_ESIR__FS_COUNTER_STORE_LOCAL_SERVICE | transport=local_fs | root=counters
+DEP_ESDC ..> FS_LOCAL_AUDIT_JOURNAL : CB_ESDC__FS_LOCAL_AUDIT_JOURNAL_LOCAL_SERVICE | transport=local_fs | root=audit_journal
+DEP_AUDIT_PROOF ..> FS_PROOF_STORE : CB_AUDIT_PROOF__FS_PROOF_STORE_LOCAL_SERVICE | transport=local_fs | root=proof_store
+DEP_STATUS_RECOVERY ..> FS_COMMAND_STATE : CB_STATUS_RECOVERY__FS_COMMAND_STATE_LOCAL_SERVICE | transport=local_fs | root=command_state
+DEP_EXPORT ..> FS_EXPORT_STAGING : CB_EXPORT__FS_EXPORT_STAGING_LOCAL_SERVICE | transport=local_fs | root=export_staging
+
+' -------------------------
+' ENDPOINT BINDINGS
+' -------------------------
+DEP_ESIR ..> EP_ESIR_PROV_ESIR_SERVICE_LOCAL : CB_BA__ESIR__ESIR_SERVICE_LOCAL_SERVICE | connector=C_BA__ESIR__ESIR_SERVICE | cp=CP_BA__ESIR__ESIR_SERVICE_LOCAL_SERVICE | ep=EP_ESIR_PROV_ESIR_SERVICE_LOCAL | cm=CI_BIND_CB_BA__ESIR__ESIR_SERVICE_LOCAL_SERVICE
+DEP_ESIR ..> EP_ESIR_PROV_ESIR_SERVICE_LOCAL : CB_OP__ESIR__ESIR_SERVICE_LOCAL_SERVICE | connector=C_OP__ESIR__ESIR_SERVICE | cp=CP_OP__ESIR__ESIR_SERVICE_LOCAL_SERVICE | ep=EP_ESIR_PROV_ESIR_SERVICE_LOCAL | cm=CI_BIND_CB_OP__ESIR__ESIR_SERVICE_LOCAL_SERVICE
+DEP_ESDC ..> EP_ESDC_PROV_ESDC_SERVICE_LOCAL : CB_ESIR__ESDC__ESDC_SERVICE_LOCAL_SERVICE | connector=C_ESIR__ESDC__ESDC_SERVICE | cp=CP_ESIR__ESDC__ESDC_SERVICE_LOCAL_SERVICE | ep=EP_ESDC_PROV_ESDC_SERVICE_LOCAL | cm=CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_LOCAL_SERVICE
+DEP_ESIR ..> EP_VSDC_PROV_TAXCORE_VSDC_REMOTE : CB_ESIR__VSDC__TAXCORE_VSDC_LOCAL_SERVICE | connector=C_ESIR__VSDC__TAXCORE_VSDC | cp=CP_ESIR__VSDC__TAXCORE_VSDC_LOCAL_SERVICE | ep=EP_VSDC_PROV_TAXCORE_VSDC_REMOTE | cm=CI_BIND_CB_ESIR__VSDC__TAXCORE_VSDC_LOCAL_SERVICE
+DEP_ESDC ..> EP_TCS_PROV_TAXCORE_SHARED_REMOTE : CB_ESDC__TCS__TAXCORE_SHARED_LOCAL_SERVICE | connector=C_ESDC__TCS__TAXCORE_SHARED | cp=CP_ESDC__TCS__TAXCORE_SHARED_LOCAL_SERVICE | ep=EP_TCS_PROV_TAXCORE_SHARED_REMOTE | cm=CI_BIND_CB_ESDC__TCS__TAXCORE_SHARED_LOCAL_SERVICE
+DEP_ESDC ..> EP_SE_PROV_SECURE_ELEMENT_LOCAL : CB_ESDC__SE__SECURE_ELEMENT_LOCAL_SERVICE | connector=C_ESDC__SE__SECURE_ELEMENT | cp=CP_ESDC__SE__SECURE_ELEMENT_LOCAL_SERVICE | ep=EP_SE_PROV_SECURE_ELEMENT_LOCAL | cm=CI_BIND_CB_ESDC__SE__SECURE_ELEMENT_LOCAL_SERVICE
+DEP_ESDC ..> EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL : CB_ESDC__PKI__CLIENT_CERT_CONTEXT_LOCAL_SERVICE | connector=C_ESDC__PKI__CLIENT_CERT_CONTEXT | cp=CP_ESDC__PKI__CLIENT_CERT_CONTEXT_LOCAL_SERVICE | ep=EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL | cm=CI_BIND_CB_ESDC__PKI__CLIENT_CERT_CONTEXT_LOCAL_SERVICE
+DEP_ESDC ..> EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE : CB_ESDC__TCB__TAXCORE_ESDC_BACKEND_LOCAL_SERVICE | connector=C_ESDC__TCB__TAXCORE_ESDC_BACKEND | cp=CP_ESDC__TCB__TAXCORE_ESDC_BACKEND_LOCAL_SERVICE | ep=EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE | cm=CI_BIND_CB_ESDC__TCB__TAXCORE_ESDC_BACKEND_LOCAL_SERVICE
+DEP_EXPORT ..> EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL : CB_ESDC__MEDIA__REMOVABLE_MEDIA_IO_LOCAL_SERVICE | connector=C_ESDC__MEDIA__REMOVABLE_MEDIA_IO | cp=CP_ESDC__MEDIA__REMOVABLE_MEDIA_IO_LOCAL_SERVICE | ep=EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL | cm=CI_BIND_CB_ESDC__MEDIA__REMOVABLE_MEDIA_IO_LOCAL_SERVICE
+
+note bottom
+  This variant keeps the fiscal core tenant-local but exposes it
+  as a local service to business applications.
+  Concrete production configs should choose either the same-host
+  loopback profile or the site-LAN profile instead of mixing both
+  topologies inside one ambiguous local-service config.
+  ESIR -> E-SDC should remain same-host whenever possible.
+end note
+@enduml

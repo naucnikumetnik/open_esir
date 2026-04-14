@@ -1,0 +1,669 @@
+artifact_kind: production_config
+schema_version: "0.1"
+
+card:
+  id: "PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS"
+  name: "Open Fiscal Core — Hosted Access Production Config"
+  system_of_interest: "Open Fiscal Core"
+  viewpoint_ref: "VP-deployment-realization"
+  level: "system"
+  deployment_variant: "hosted_access"
+  scope: "Split deployment where business-facing ESIR access is hosted in cloud, while tenant-local edge runtime retains E-SDC, secure-element access, audit persistence, backend sync, and local export."
+  purpose: "Select concrete runtime elements, bindings, endpoints, storage roots, and operating policies for hosted-access deployment."
+  owner: "NaucnikUmetnik"
+  status: "draft"
+
+traceability:
+  related_structural_view_refs:
+    - "SV_SYS_OPEN_FISCAL_CORE"
+  related_deployment_view_refs:
+    - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+    - "DV_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS"
+  related_dynamic_view_refs:
+    - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+    - "S_SYS_FISCALIZE_INVOICE"
+    - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
+    - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
+    - "S_SYS_LOCAL_AUDIT_EXPORT"
+    - "S_SYS_PUBLIC_VERIFICATION"
+  related_interface_refs:
+    - "IF_SYS_ESIR_SERVICE"
+    - "IF_SYS_ESDC_SERVICE"
+    - "IF_DEP_TAXCORE_VSDC"
+    - "IF_DEP_SECURE_ELEMENT"
+    - "IF_DEP_TAXCORE_SHARED"
+    - "IF_DEP_TAXCORE_ESDC_BACKEND"
+    - "IF_DEP_PKI_CLIENT_CONTEXT"
+    - "IF_DEP_REMOVABLE_MEDIA_IO"
+  related_requirement_refs: []
+  related_constraint_refs: []
+  related_cm_catalogue_refs:
+    - "CM_CATALOGUE_OPEN_FISCAL_CORE"
+  decision_record_refs: []
+
+deployment_selection:
+  zones:
+    required:
+      - "Z_CLIENT_ACCESS"
+      - "Z_CLOUD_OPEN_FISCAL_CORE"
+      - "Z_TENANT_SITE"
+      - "Z_TAXCORE_EXTERNAL"
+    optional: []
+
+  nodes:
+    required:
+      - "N_BUSINESS_DEVICE"
+      - "N_OFC_CLOUD_RUNTIME"
+      - "N_TENANT_EDGE_HOST"
+      - "N_SE_DEVICE"
+      - "N_PKI_CONTEXT"
+      - "N_VSDC"
+      - "N_TAXCORE_SHARED"
+      - "N_TAXCORE_BACKEND"
+    optional:
+      - "N_OPERATOR_DEVICE"
+      - "N_REMOVABLE_MEDIA"
+
+  runtime_boundaries:
+    required:
+      - "RB_BUSINESS_APP_RUNTIME"
+      - "RB_OFC_CLOUD_RUNTIME"
+      - "RB_OFC_EDGE_RUNTIME"
+    optional:
+      - "RB_OPERATOR_RUNTIME"
+
+  hosted_elements:
+    enabled:
+      - "DEP_ESIR_CLOUD"
+      - "DEP_REMOTE_COORDINATION"
+      - "DEP_BOOTSTRAP_EDGE"
+      - "DEP_ESDC_EDGE"
+      - "DEP_STATUS_RECOVERY_EDGE"
+      - "DEP_AUDIT_PROOF_EDGE"
+      - "DEP_EXPORT_EDGE"
+    disabled: []
+
+  external_dependencies:
+    required:
+      - "DEP_EXT_SE"
+      - "DEP_EXT_PKI_CONTEXT"
+      - "DEP_EXT_VSDC"
+      - "DEP_EXT_TCS"
+      - "DEP_EXT_TCB"
+    optional:
+      - "DEP_EXT_REMOVABLE_MEDIA"
+
+binding_policy:
+  connector_bindings:
+    - connector_ref: "C_BA__ESIR__ESIR_SERVICE"
+      binding_ref: "CI_BIND_CB_BA__ESIR__ESIR_SERVICE_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_BA_USE_ESIR_SERVICE_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_ESIR_PROV_ESIR_SERVICE_HOSTED"
+      communication_path_ref: "CP_BA__ESIR__ESIR_SERVICE_HOSTED_ACCESS"
+      transport_profile: "TP_REMOTE_HTTPS_JSON_TENANT_AUTH"
+      required: true
+      activation_condition: "always"
+      fallback_binding_ref: ""
+      notes: "Primary business-facing path goes to hosted ESIR service."
+
+    - connector_ref: "C_OP__ESIR__ESIR_SERVICE"
+      binding_ref: "CI_BIND_CB_OP__ESIR__ESIR_SERVICE_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_OP_USE_ESIR_SERVICE_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_ESIR_PROV_ESIR_SERVICE_HOSTED"
+      communication_path_ref: "CP_OP__ESIR__ESIR_SERVICE_HOSTED_ACCESS"
+      transport_profile: "TP_REMOTE_HTTPS_JSON_TENANT_AUTH"
+      required: false
+      activation_condition: "when_operator_console_enabled"
+      fallback_binding_ref: ""
+      notes: "Optional operator/service-console access to hosted ESIR service."
+
+    - connector_ref: "C_ESIR__ESDC__ESDC_SERVICE"
+      binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESIR_USE_ESDC_SERVICE_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_ESDC_PROV_ESDC_SERVICE_EDGE"
+      communication_path_ref: "CP_ESIR__ESDC__ESDC_SERVICE_HOSTED_ACCESS"
+      transport_profile: "TP_EDGE_INITIATED_SECURE_TUNNEL"
+      required: true
+      activation_condition: "always"
+      fallback_binding_ref: ""
+      notes: "Logical ESIR -> E-SDC path is realized through tenant edge initiated outbound secure tunnel/session."
+
+    - connector_ref: "C_ESIR__VSDC__TAXCORE_VSDC"
+      binding_ref: "CI_BIND_CB_ESIR__VSDC__TAXCORE_VSDC_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESIR_USE_TAXCORE_VSDC_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_VSDC_PROV_TAXCORE_VSDC_REMOTE"
+      communication_path_ref: "CP_ESIR__VSDC__TAXCORE_VSDC_HOSTED_ACCESS"
+      transport_profile: "TP_REMOTE_HTTPS_JSON_MTLS"
+      required: true
+      activation_condition: "when_online_path_selected"
+      fallback_binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_HOSTED_ACCESS"
+      notes: "Hosted online fiscalization path. Falls back to edge E-SDC path when online route is unavailable."
+
+    - connector_ref: "C_ESDC__SE__SECURE_ELEMENT"
+      binding_ref: "CI_BIND_CB_ESDC__SE__SECURE_ELEMENT_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_SECURE_ELEMENT_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL"
+      communication_path_ref: "CP_ESDC__SE__SECURE_ELEMENT_HOSTED_ACCESS"
+      transport_profile: "TP_LOCAL_APDU"
+      required: true
+      activation_condition: "when_local_signing_required"
+      fallback_binding_ref: ""
+      notes: "Critical tenant-local signing path."
+
+    - connector_ref: "C_ESDC__PKI__CLIENT_CERT_CONTEXT"
+      binding_ref: "CI_BIND_CB_ESDC__PKI__CLIENT_CERT_CONTEXT_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_CLIENT_CERT_CONTEXT_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL"
+      communication_path_ref: "CP_ESDC__PKI__CLIENT_CERT_CONTEXT_HOSTED_ACCESS"
+      transport_profile: "TP_LOCAL_API"
+      required: true
+      activation_condition: "always"
+      fallback_binding_ref: ""
+      notes: "Tenant-local PKI context for authenticated backend-facing flows."
+
+    - connector_ref: "C_ESDC__TCS__TAXCORE_SHARED"
+      binding_ref: "CI_BIND_CB_ESDC__TCS__TAXCORE_SHARED_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_TAXCORE_SHARED_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_TCS_PROV_TAXCORE_SHARED_REMOTE"
+      communication_path_ref: "CP_ESDC__TCS__TAXCORE_SHARED_HOSTED_ACCESS"
+      transport_profile: "TP_REMOTE_HTTPS_JSON"
+      required: true
+      activation_condition: "during_bootstrap_or_refresh"
+      fallback_binding_ref: ""
+      notes: "Used from tenant edge for bootstrap/shared reference data access, with local cache allowed when policy permits."
+
+    - connector_ref: "C_ESDC__TCB__TAXCORE_ESDC_BACKEND"
+      binding_ref: "CI_BIND_CB_ESDC__TCB__TAXCORE_ESDC_BACKEND_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_TAXCORE_ESDC_BACKEND_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE"
+      communication_path_ref: "CP_ESDC__TCB__TAXCORE_ESDC_BACKEND_HOSTED_ACCESS"
+      transport_profile: "TP_REMOTE_HTTPS_JSON_AUTH"
+      required: true
+      activation_condition: "when_backend_sync_enabled"
+      fallback_binding_ref: ""
+      notes: "Used for online status, command lifecycle, audit package submission, and related backend flows from tenant edge."
+
+    - connector_ref: "C_ESDC__MEDIA__REMOVABLE_MEDIA_IO"
+      binding_ref: "CI_BIND_CB_ESDC__MEDIA__REMOVABLE_MEDIA_IO_HOSTED_ACCESS"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_REMOVABLE_MEDIA_IO_HOSTED_ACCESS"
+      provider_endpoint_ref: "CI_BIND_EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL"
+      communication_path_ref: "CP_ESDC__MEDIA__REMOVABLE_MEDIA_IO_HOSTED_ACCESS"
+      transport_profile: "TP_LOCAL_FILESYSTEM_MEDIA"
+      required: false
+      activation_condition: "when_local_audit_export_requested"
+      fallback_binding_ref: ""
+      notes: "Optional removable-media export path on tenant edge."
+
+endpoint_selection:
+  endpoints:
+    - endpoint_ref: "CI_BIND_EP_ESIR_PROV_ESIR_SERVICE_HOSTED"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_TENANT_AUTH"
+      notes: "Hosted business-facing ESIR service endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_ESDC_PROV_ESDC_SERVICE_EDGE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_EDGE_SECURE_TUNNEL_PROVIDER"
+      notes: "Tenant edge E-SDC provider endpoint reachable only through edge-initiated secure tunnel/session."
+
+    - endpoint_ref: "CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "other"
+      security_profile_ref: "SP_LOCAL_DEVICE_SECURE"
+      notes: "Local secure-element access endpoint on tenant edge."
+
+    - endpoint_ref: "CI_BIND_EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "other"
+      security_profile_ref: "SP_LOCAL_DEVICE_SECURE"
+      notes: "Local PKI applet / cert context endpoint on tenant edge."
+
+    - endpoint_ref: "CI_BIND_EP_TCS_PROV_TAXCORE_SHARED_REMOTE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_SERVER_AUTH"
+      notes: "Remote TaxCore shared service endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_CLIENT_CERT"
+      notes: "Remote TaxCore backend endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_VSDC_PROV_TAXCORE_VSDC_REMOTE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_CLIENT_CERT"
+      notes: "Remote V-SDC endpoint for hosted online fiscalization."
+
+    - endpoint_ref: "CI_BIND_EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL"
+      role: "provider"
+      selected: true
+      required: false
+      addressing_mode: "other"
+      security_profile_ref: "SP_LOCAL_OPERATOR_CONTROLLED"
+      notes: "Optional removable media endpoint on tenant edge."
+
+storage_policy:
+  stores:
+    - store_ref: "FS_OFC_CLOUD_CONFIG"
+      binding_ref: "CB_REMOTE_COORDINATION__FS_OFC_CLOUD_CONFIG_HOSTED_ACCESS"
+      transport: "managed_storage"
+      root: "tenant_config"
+      required: true
+      persistence: "durable"
+      backup_policy: "snapshot"
+      retention_policy: "retain_until_replaced_by_approved_config"
+      encryption_at_rest: true
+      notes: "Hosted tenant metadata, service configuration, and remote coordination state."
+
+    - store_ref: "FS_COUNTER_STORE_CLOUD"
+      binding_ref: "CB_ESIR_CLOUD__FS_COUNTER_STORE_CLOUD_HOSTED_ACCESS"
+      transport: "managed_storage"
+      root: "counters"
+      required: true
+      persistence: "durable"
+      backup_policy: "snapshot"
+      retention_policy: "retain_for_system_lifetime"
+      encryption_at_rest: true
+      notes: "Hosted ESIR counter and sequence state."
+
+    - store_ref: "FS_EDGE_CONFIG"
+      binding_ref: "CB_BOOTSTRAP_EDGE__FS_EDGE_CONFIG_HOSTED_ACCESS"
+      transport: "local_fs"
+      root: "/srv/ofc_edge/config"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_until_replaced_by_approved_config"
+      encryption_at_rest: false
+      notes: "Tenant edge configuration and locally cached bootstrap/shared data."
+
+    - store_ref: "FS_LOCAL_AUDIT_JOURNAL"
+      binding_ref: "CB_ESDC_EDGE__FS_LOCAL_AUDIT_JOURNAL_HOSTED_ACCESS"
+      transport: "local_fs"
+      root: "/srv/ofc_edge/audit_journal"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_until_successfully transferred and retention period satisfied"
+      encryption_at_rest: true
+      notes: "Critical tenant-local audit persistence for edge-side lifecycle."
+
+    - store_ref: "FS_PROOF_STORE"
+      binding_ref: "CB_AUDIT_PROOF_EDGE__FS_PROOF_STORE_HOSTED_ACCESS"
+      transport: "local_fs"
+      root: "/srv/ofc_edge/proof_store"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_according_to_fiscal_evidence_policy"
+      encryption_at_rest: true
+      notes: "Tenant-local proof/evidence artifacts related to audit and verification lifecycle."
+
+    - store_ref: "FS_COMMAND_STATE"
+      binding_ref: "CB_STATUS_RECOVERY_EDGE__FS_COMMAND_STATE_HOSTED_ACCESS"
+      transport: "local_fs"
+      root: "/srv/ofc_edge/command_state"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_until_command_lifecycle_closed"
+      encryption_at_rest: false
+      notes: "Tracks backend commands and edge-side local processing state."
+
+    - store_ref: "FS_EXPORT_STAGING"
+      binding_ref: "CB_EXPORT_EDGE__FS_EXPORT_STAGING_HOSTED_ACCESS"
+      transport: "local_fs"
+      root: "/srv/ofc_edge/export_staging"
+      required: false
+      persistence: "persistent"
+      backup_policy: "none"
+      retention_policy: "retain_until_export_confirmed_or_cleared_by_operator"
+      encryption_at_rest: false
+      notes: "Optional staging area for local audit export packages on tenant edge."
+
+security_policy:
+  identity_context:
+    tenant_id: "TENANT_DEFAULT"
+    site_id: "SITE_PRIMARY"
+    device_id: "TENANT_EDGE_HOST_01"
+    operator_scope: "REMOTE_OPERATOR_AND_LOCAL_EDGE"
+    fiscal_subject_ref: "FISCAL_SUBJECT_PRIMARY"
+
+  pki:
+    client_cert_context_ref: "PKI_CONTEXT_EDGE_DEFAULT"
+    cert_source: "applet"
+    key_access_mode: "applet"
+    required: true
+    notes: "Local tenant-edge PKI context used for backend-facing authenticated calls."
+
+  taxcore_auth:
+    auth_mode: "client_certificate"
+    token_refresh_owner: "DEP_ESDC_EDGE"
+    required: true
+    notes: "Authentication and token lifecycle for backend-facing flows remain edge-owned."
+
+  secure_element:
+    endpoint_ref: "CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL"
+    access_mode: "local_apdu"
+    required: true
+    notes: "Hard requirement for tenant-local signing path."
+
+  secrets:
+    secret_source: "vault"
+    rotation_policy: "vault_primary_with_edge_material_operational_rotation"
+    notes: "Hosted service credentials use managed vault as the primary source of truth, while tenant-edge private material remains in local trusted store."
+
+  trust_constraints:
+    - id: "TC_LOCAL_SIGNING_REMAINS_TENANT_LOCAL"
+      description: "Secure-element operations must remain tenant-local and must not be proxied through hosted shared infrastructure."
+
+    - id: "TC_CLIENT_CERT_CONTEXT_REMAINS_LOCAL_TO_EDGE"
+      description: "Client certificate private-key access for backend-facing calls must remain in tenant-edge trusted PKI context."
+
+    - id: "TC_EDGE_CONNECTIVITY_IS_OUTBOUND_INITIATED"
+      description: "Cloud-to-edge operational reachability must be realized through edge-initiated outbound connectivity and must not require direct inbound public internet reachability to tenant edge host."
+
+network_policy:
+  connectivity_assumptions:
+    edge_initiated_outbound_only: true
+    inbound_edge_reachability_required: false
+    remote_operation_required: true
+
+  path_constraints:
+    - communication_path_ref: "CP_BA__ESIR__ESIR_SERVICE_HOSTED_ACCESS"
+      locality: "internet"
+      allowed_transports:
+        - "https_json"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_CALLER_BOUNDED"
+      notes: "Business app reaches hosted ESIR over remote network."
+
+    - communication_path_ref: "CP_OP__ESIR__ESIR_SERVICE_HOSTED_ACCESS"
+      locality: "internet"
+      allowed_transports:
+        - "https_json"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_CALLER_BOUNDED"
+      notes: "Optional operator/service-console path to hosted ESIR."
+
+    - communication_path_ref: "CP_ESIR__ESDC__ESDC_SERVICE_HOSTED_ACCESS"
+      locality: "internet"
+      allowed_transports:
+        - "secure_tunnel"
+        - "persistent_session"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_TUNNEL_RECONNECT"
+      notes: "Logical ESIR -> E-SDC communication is realized through outbound edge initiated secure tunnel/session."
+
+    - communication_path_ref: "CP_ESDC__SE__SECURE_ELEMENT_HOSTED_ACCESS"
+      locality: "same_host"
+      allowed_transports:
+        - "local_apdu"
+        - "vendor_sdk"
+      timeout_profile_ref: "TPROF_DEVICE_IO"
+      retry_profile_ref: "RPROF_DEVICE_IO_LIMITED"
+      notes: "Critical tenant-edge local device path."
+
+    - communication_path_ref: "CP_ESDC__PKI__CLIENT_CERT_CONTEXT_HOSTED_ACCESS"
+      locality: "same_host"
+      allowed_transports:
+        - "local_api"
+        - "applet"
+      timeout_profile_ref: "TPROF_DEVICE_IO"
+      retry_profile_ref: "RPROF_DEVICE_IO_LIMITED"
+      notes: "Tenant-edge local PKI context access."
+
+    - communication_path_ref: "CP_ESDC__TCS__TAXCORE_SHARED_HOSTED_ACCESS"
+      locality: "internet"
+      allowed_transports:
+        - "https_json"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_REMOTE_BOUNDED"
+      notes: "Bootstrap / shared-data fetch path from tenant edge."
+
+    - communication_path_ref: "CP_ESIR__VSDC__TAXCORE_VSDC_HOSTED_ACCESS"
+      locality: "internet"
+      allowed_transports:
+        - "https_json_mtls"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_REMOTE_BOUNDED"
+      notes: "Hosted online fiscalization path."
+
+    - communication_path_ref: "CP_ESDC__TCB__TAXCORE_ESDC_BACKEND_HOSTED_ACCESS"
+      locality: "internet"
+      allowed_transports:
+        - "https_json_auth"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_BACKGROUND_RETRY"
+      notes: "Backend sync and command lifecycle path from tenant edge."
+
+    - communication_path_ref: "CP_ESDC__MEDIA__REMOVABLE_MEDIA_IO_HOSTED_ACCESS"
+      locality: "same_site"
+      allowed_transports:
+        - "filesystem"
+      timeout_profile_ref: "TPROF_DEVICE_IO"
+      retry_profile_ref: "RPROF_NO_AUTORETRY_OPERATOR_ACTION"
+      notes: "Operator-triggered export path on tenant edge."
+
+feature_toggles:
+  ba_local_fiscalization_autonomy_enabled: false
+  tenant_local_offline_evidence_enabled: true
+  local_audit_export_enabled: true
+  public_verification_enabled: true
+  hosted_access_enabled: true
+  operator_console_enabled: true
+  backend_sync_enabled: true
+  command_processing_enabled: true
+  proof_lifecycle_enabled: true
+
+bootstrap_policy:
+  startup_sequence_refs:
+    - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+  required_preconditions:
+    - "cloud_config_store_accessible"
+    - "cloud_counter_store_accessible"
+    - "edge_config_store_accessible"
+    - "edge_audit_journal_accessible"
+    - "secure_tunnel_binding_declared"
+    - "edge_identity_declared"
+    - "pki_context_declared"
+    - "secure_element_binding_declared"
+    - "hosted_business_endpoint_bindable"
+  fail_fast_conditions:
+    - "cloud_config_missing_or_invalid"
+    - "cloud_counter_store_unavailable"
+    - "edge_audit_journal_unavailable"
+    - "mandatory_binding_missing"
+    - "hosted_esir_service_endpoint_not_bindable"
+  readiness_gate_refs:
+    - "RG_CLOUD_CONFIG_LOADED"
+    - "RG_CLOUD_ESIR_INITIALIZED"
+    - "RG_CLOUD_COUNTER_STORE_READY"
+    - "RG_EDGE_RUNTIME_INITIALIZED"
+    - "RG_EDGE_AUDIT_JOURNAL_READY"
+    - "RG_EDGE_TUNNEL_READY"
+    - "RG_HOSTED_BUSINESS_SERVICE_ENDPOINT_READY"
+  reload_policy: "static_on_boot"
+  notes: "Boot hosted ESIR and tenant-edge runtime with coordinated configuration, then enter serving state only after cloud business endpoint, edge audit state, and secure tunnel/session path are ready."
+
+degraded_mode_policy:
+  rules:
+    - id: "R_VSDC_UNAVAILABLE_FALLBACK_TO_EDGE_ESDC"
+      trigger: "remote_vsdc_unreachable_or_online_path_rejected"
+      affected_connectors:
+        - "C_ESIR__VSDC__TAXCORE_VSDC"
+        - "C_ESIR__ESDC__ESDC_SERVICE"
+      behavior: "fallback"
+      fallback_binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_HOSTED_ACCESS"
+      operator_visibility: "recommended"
+      recovery_condition: "remote_vsdc_reachable_and_online_path_restored"
+      notes: "Prefer hosted online path when available, but allow hosted ESIR to use tenant-edge E-SDC path when online route cannot be used."
+
+    - id: "R_EDGE_TUNNEL_UNAVAILABLE_BLOCK_BA_FISCALIZATION"
+      trigger: "edge_tunnel_unavailable_or_edge_runtime_unreachable"
+      affected_connectors:
+        - "C_ESIR__ESDC__ESDC_SERVICE"
+        - "C_BA__ESIR__ESIR_SERVICE"
+      behavior: "degrade"
+      fallback_binding_ref: ""
+      operator_visibility: "required"
+      recovery_condition: "edge_tunnel_restored_and_edge_runtime_reachable"
+      notes: "Business-facing hosted ESIR remains reachable, but invoice fiscalization path cannot complete without edge E-SDC path."
+
+    - id: "R_TCB_UNAVAILABLE_DEFER_BACKEND_SYNC"
+      trigger: "taxcore_backend_unreachable"
+      affected_connectors:
+        - "C_ESDC__TCB__TAXCORE_ESDC_BACKEND"
+      behavior: "queue"
+      fallback_binding_ref: ""
+      operator_visibility: "recommended"
+      recovery_condition: "backend_reachable_and_sync_scheduler_resumes"
+      notes: "Audit transfer and command sync are deferred while local edge evidence remains preserved."
+
+    - id: "R_TCS_UNAVAILABLE_USE_CACHED_SHARED_DATA"
+      trigger: "taxcore_shared_unreachable"
+      affected_connectors:
+        - "C_ESDC__TCS__TAXCORE_SHARED"
+      behavior: "defer"
+      fallback_binding_ref: ""
+      operator_visibility: "recommended"
+      recovery_condition: "taxcore_shared_reachable_and_refresh_succeeds"
+      notes: "Use previously cached shared/bootstrap data on edge when policy allows."
+
+    - id: "R_SE_UNAVAILABLE_FAIL_EDGE_SIGNING"
+      trigger: "secure_element_unreachable_or_signing_failed_nonrecoverably"
+      affected_connectors:
+        - "C_ESDC__SE__SECURE_ELEMENT"
+      behavior: "fail"
+      fallback_binding_ref: ""
+      operator_visibility: "required"
+      recovery_condition: "secure_element_reachable_and_signing_path_restored"
+      notes: "No tenant-edge signing fallback exists without secure element."
+
+    - id: "R_MEDIA_UNAVAILABLE_KEEP_EXPORT_PENDING"
+      trigger: "removable_media_not_present_or_write_failed"
+      affected_connectors:
+        - "C_ESDC__MEDIA__REMOVABLE_MEDIA_IO"
+      behavior: "defer"
+      fallback_binding_ref: ""
+      operator_visibility: "recommended"
+      recovery_condition: "removable_media_present_and_export_retried_successfully"
+      notes: "Export remains pending in staging area until operator retries."
+
+    - id: "R_HOSTED_ESIR_UNREACHABLE_FAIL_REMOTE_ACCESS"
+      trigger: "hosted_esir_service_unreachable_from_clients"
+      affected_connectors:
+        - "C_BA__ESIR__ESIR_SERVICE"
+        - "C_OP__ESIR__ESIR_SERVICE"
+      behavior: "fail"
+      fallback_binding_ref: ""
+      operator_visibility: "required"
+      recovery_condition: "hosted_esir_service_reachable_again"
+      notes: "There is no local BA-facing ESIR fallback in this deployment profile."
+
+health_policy:
+  readiness_requirements:
+    - "cloud_config_loaded"
+    - "cloud_esir_ready"
+    - "cloud_counter_store_ready"
+    - "edge_runtime_ready"
+    - "edge_audit_journal_ready"
+    - "edge_tunnel_ready"
+    - "hosted_business_service_endpoint_ready"
+
+  liveness_requirements:
+    - "cloud_runtime_responsive"
+    - "edge_runtime_heartbeat_present"
+    - "secure_tunnel_session_operational"
+
+  serving_state_policy:
+    initial_state_ref: "SERVING_BOOTSTRAPPING"
+    ready_state_refs:
+      - "SERVING_READY"
+    degraded_state_refs:
+      - "SERVING_DEGRADED_REMOTE_ACCESS_LIMITED"
+      - "SERVING_DEGRADED_EDGE_PATH_UNAVAILABLE"
+    blocked_state_refs:
+      - "SERVING_BLOCKED"
+
+observability_policy:
+  logging_level: "required"
+  audit_trail_enabled: true
+  mandatory_event_refs: []
+  correlation_fields:
+    - "tenant_id"
+    - "site_id"
+    - "device_id"
+    - "request_id"
+    - "invoice_id"
+    - "audit_package_id"
+    - "edge_node_id"
+    - "tunnel_session_id"
+    - "service_endpoint_id"
+  alarm_rules:
+    - id: "ALARM_EDGE_TUNNEL_UNAVAILABLE"
+      trigger: "edge_tunnel_unavailable"
+      severity: "critical"
+      operator_visibility: "required"
+
+    - id: "ALARM_SECURE_ELEMENT_UNAVAILABLE"
+      trigger: "secure_element_unreachable"
+      severity: "critical"
+      operator_visibility: "required"
+
+    - id: "ALARM_BACKEND_SYNC_BACKLOG"
+      trigger: "backend_sync_backlog_exceeds_policy"
+      severity: "warning"
+      operator_visibility: "recommended"
+
+    - id: "ALARM_HOSTED_SERVICE_UNAVAILABLE"
+      trigger: "hosted_esir_service_unreachable"
+      severity: "critical"
+      operator_visibility: "required"
+
+export_policy:
+  removable_media_required: false
+  supported_media_types:
+    - "usb_mass_storage"
+    - "sd_card"
+  staging_store_ref: "FS_EXPORT_STAGING"
+  export_format_refs:
+    - "AUDIT_EXPORT_PACKAGE_V1"
+  operator_confirmation_required: true
+  notes: "Local audit export is operator-triggered on tenant edge and may remain pending until removable media is available."
+
+analysis_notes:
+  assumptions:
+    - "Business-facing ESIR access is hosted in cloud."
+    - "Tenant-edge runtime remains responsible for secure-element access, local audit persistence, backend sync, and export."
+    - "Logical ESIR -> E-SDC communication is realized through edge-initiated outbound secure tunnel/session."
+    - "Hosted access does not provide full tenant-local BA-facing fiscalization autonomy during WAN or hosted ESIR outage."
+    - "Public verification enablement means generation and preservation of verification data for externally reachable public verification, not direct system-owned runtime invocation of public verification service."
+    - "operator_console_enabled controls capability exposure, not permanent presence of a dedicated operator device."
+    - "endpoint_selection enumerates provider endpoints selected for this deployment; consumer_endpoint_ref values remain binding-level references."
+    - "Shared/bootstrap data may be cached locally on edge when policy permits."
+  open_issues:
+    - "Backfill concrete CM catalogue refs for consumer endpoints and transport profiles."
+    - "Backfill formal event refs once observability catalogue is finalized."
+    - "Replace serving state placeholders with final state artifact refs when state views are completed."
+    - "Decide whether remote coordination and hosted ESIR should share the same service boundary or remain explicitly separated in later component decomposition."

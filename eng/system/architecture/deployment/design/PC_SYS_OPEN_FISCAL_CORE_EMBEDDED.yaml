@@ -1,0 +1,584 @@
+artifact_kind: production_config
+schema_version: "0.1"
+
+card:
+  id: "PC_SYS_OPEN_FISCAL_CORE_EMBEDDED"
+  name: "Open Fiscal Core — Embedded Production Config"
+  system_of_interest: "Open Fiscal Core"
+  viewpoint_ref: "VP-deployment-realization"
+  level: "system"
+  deployment_variant: "embedded"
+  scope: "Embedded terminal deployment where business application and Open Fiscal Core run on the same tenant-local device."
+  purpose: "Select concrete runtime elements, bindings, endpoints, storage roots, and operating policies for embedded deployment."
+  owner: "NaucnikUmetnik"
+  status: "draft"
+
+traceability:
+  related_structural_view_refs:
+    - "SV_SYS_OPEN_FISCAL_CORE"
+  related_deployment_view_refs:
+    - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+    - "DV_SYS_OPEN_FISCAL_CORE_EMBEDDED"
+  related_dynamic_view_refs:
+    - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+    - "S_SYS_FISCALIZE_INVOICE"
+    - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
+    - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
+    - "S_SYS_LOCAL_AUDIT_EXPORT"
+    - "S_SYS_PUBLIC_VERIFICATION"
+  related_interface_refs:
+    - "IF_SYS_ESIR_SERVICE"
+    - "IF_SYS_ESDC_SERVICE"
+    - "IF_DEP_TAXCORE_VSDC"
+    - "IF_DEP_SECURE_ELEMENT"
+    - "IF_DEP_TAXCORE_SHARED"
+    - "IF_DEP_TAXCORE_ESDC_BACKEND"
+    - "IF_DEP_PKI_CLIENT_CONTEXT"
+    - "IF_DEP_REMOVABLE_MEDIA_IO"
+  related_requirement_refs: []
+  related_constraint_refs: []
+  related_cm_catalogue_refs:
+    - "CM_CATALOGUE_OPEN_FISCAL_CORE"
+  decision_record_refs: []
+
+deployment_selection:
+  zones:
+    required:
+      - "Z_TENANT_SITE"
+      - "Z_TAXCORE_EXTERNAL"
+    optional: []
+
+  nodes:
+    required:
+      - "N_EMBEDDED_TERMINAL"
+      - "N_SE_DEVICE"
+      - "N_PKI_CONTEXT"
+      - "N_VSDC"
+      - "N_TAXCORE_SHARED"
+      - "N_TAXCORE_BACKEND"
+    optional:
+      - "N_REMOVABLE_MEDIA"
+
+  runtime_boundaries:
+    required:
+      - "RB_BUSINESS_APP_RUNTIME"
+      - "RB_OFC_EMBEDDED_RUNTIME"
+    optional: []
+
+  hosted_elements:
+    enabled:
+      - "DEP_BOOTSTRAP"
+      - "DEP_ESIR"
+      - "DEP_ESDC"
+      - "DEP_STATUS_RECOVERY"
+      - "DEP_AUDIT_PROOF"
+      - "DEP_EXPORT"
+    disabled: []
+
+  external_dependencies:
+    required:
+      - "DEP_EXT_SE"
+      - "DEP_EXT_PKI_CONTEXT"
+      - "DEP_EXT_VSDC"
+      - "DEP_EXT_TCS"
+      - "DEP_EXT_TCB"
+    optional:
+      - "DEP_EXT_REMOVABLE_MEDIA"
+
+binding_policy:
+  connector_bindings:
+    - connector_ref: "C_BA__ESIR__ESIR_SERVICE"
+      binding_ref: "CI_BIND_CB_BA__ESIR__ESIR_SERVICE_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_BA_USE_ESIR_SERVICE_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_ESIR_PROV_ESIR_SERVICE_EMBEDDED"
+      communication_path_ref: "CP_BA__ESIR__ESIR_SERVICE_EMBEDDED"
+      transport_profile: "TP_IN_PROCESS"
+      required: true
+      activation_condition: "always"
+      fallback_binding_ref: ""
+      notes: "Primary embedded business-facing path. Same device, same host."
+
+    - connector_ref: "C_ESIR__ESDC__ESDC_SERVICE"
+      binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESIR_USE_ESDC_SERVICE_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_ESDC_PROV_ESDC_SERVICE_EMBEDDED"
+      communication_path_ref: "CP_ESIR__ESDC__ESDC_SERVICE_EMBEDDED"
+      transport_profile: "TP_IN_PROCESS"
+      required: true
+      activation_condition: "always"
+      fallback_binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_EMBEDDED_SAME_HOST_IPC"
+      notes: "Default is in-process. Same-host IPC may be used only if strict process separation is introduced."
+
+    - connector_ref: "C_ESIR__VSDC__TAXCORE_VSDC"
+      binding_ref: "CI_BIND_CB_ESIR__VSDC__TAXCORE_VSDC_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESIR_USE_TAXCORE_VSDC_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_VSDC_PROV_TAXCORE_VSDC_REMOTE"
+      communication_path_ref: "CP_ESIR__VSDC__TAXCORE_VSDC_EMBEDDED"
+      transport_profile: "TP_REMOTE_HTTPS_JSON_MTLS"
+      required: true
+      activation_condition: "when_online_path_selected"
+      fallback_binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_EMBEDDED"
+      notes: "Used when internet path is available and online fiscalization is selected."
+
+    - connector_ref: "C_ESDC__SE__SECURE_ELEMENT"
+      binding_ref: "CI_BIND_CB_ESDC__SE__SECURE_ELEMENT_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_SECURE_ELEMENT_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL"
+      communication_path_ref: "CP_ESDC__SE__SECURE_ELEMENT_EMBEDDED"
+      transport_profile: "TP_LOCAL_APDU"
+      required: true
+      activation_condition: "when_local_signing_required"
+      fallback_binding_ref: ""
+      notes: "Critical path for local signing."
+
+    - connector_ref: "C_ESDC__PKI__CLIENT_CERT_CONTEXT"
+      binding_ref: "CI_BIND_CB_ESDC__PKI__CLIENT_CERT_CONTEXT_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_CLIENT_CERT_CONTEXT_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL"
+      communication_path_ref: "CP_ESDC__PKI__CLIENT_CERT_CONTEXT_EMBEDDED"
+      transport_profile: "TP_LOCAL_API"
+      required: true
+      activation_condition: "always"
+      fallback_binding_ref: ""
+      notes: "Provides client certificate / PKI context for backend-facing authenticated flows."
+
+    - connector_ref: "C_ESDC__TCS__TAXCORE_SHARED"
+      binding_ref: "CI_BIND_CB_ESDC__TCS__TAXCORE_SHARED_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_TAXCORE_SHARED_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_TCS_PROV_TAXCORE_SHARED_REMOTE"
+      communication_path_ref: "CP_ESDC__TCS__TAXCORE_SHARED_EMBEDDED"
+      transport_profile: "TP_REMOTE_HTTPS_JSON"
+      required: true
+      activation_condition: "during_bootstrap_or_refresh"
+      fallback_binding_ref: ""
+      notes: "Used for bootstrap/shared reference data access. Cached data may be reused when temporarily unavailable."
+
+    - connector_ref: "C_ESDC__TCB__TAXCORE_ESDC_BACKEND"
+      binding_ref: "CI_BIND_CB_ESDC__TCB__TAXCORE_ESDC_BACKEND_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_TAXCORE_ESDC_BACKEND_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE"
+      communication_path_ref: "CP_ESDC__TCB__TAXCORE_ESDC_BACKEND_EMBEDDED"
+      transport_profile: "TP_REMOTE_HTTPS_JSON_AUTH"
+      required: true
+      activation_condition: "when_backend_sync_enabled"
+      fallback_binding_ref: ""
+      notes: "Used for online status, command lifecycle, audit package submission, and related backend flows."
+
+    - connector_ref: "C_ESDC__MEDIA__REMOVABLE_MEDIA_IO"
+      binding_ref: "CI_BIND_CB_ESDC__MEDIA__REMOVABLE_MEDIA_IO_EMBEDDED"
+      consumer_endpoint_ref: "CI_BIND_EP_ESDC_USE_REMOVABLE_MEDIA_IO_EMBEDDED"
+      provider_endpoint_ref: "CI_BIND_EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL"
+      communication_path_ref: "CP_ESDC__MEDIA__REMOVABLE_MEDIA_IO_EMBEDDED"
+      transport_profile: "TP_LOCAL_FILESYSTEM_MEDIA"
+      required: false
+      activation_condition: "when_local_audit_export_requested"
+      fallback_binding_ref: ""
+      notes: "Optional capability used only during local audit export."
+
+endpoint_selection:
+  endpoints:
+    - endpoint_ref: "CI_BIND_EP_ESIR_PROV_ESIR_SERVICE_EMBEDDED"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "in_process"
+      security_profile_ref: "SP_LOCAL_TRUST_BOUNDARY"
+      notes: "Business-facing ESIR service endpoint inside embedded terminal."
+
+    - endpoint_ref: "CI_BIND_EP_ESDC_PROV_ESDC_SERVICE_EMBEDDED"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "in_process"
+      security_profile_ref: "SP_LOCAL_TRUST_BOUNDARY"
+      notes: "Local E-SDC provider endpoint inside same embedded runtime."
+
+    - endpoint_ref: "CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "other"
+      security_profile_ref: "SP_LOCAL_DEVICE_SECURE"
+      notes: "Local secure-element access endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_PKI_PROV_CLIENT_CERT_CONTEXT_LOCAL"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "other"
+      security_profile_ref: "SP_LOCAL_DEVICE_SECURE"
+      notes: "Local PKI applet / cert context endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_TCS_PROV_TAXCORE_SHARED_REMOTE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_SERVER_AUTH"
+      notes: "Remote TaxCore shared service endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_TCB_PROV_TAXCORE_ESDC_BACKEND_REMOTE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_CLIENT_CERT"
+      notes: "Remote TaxCore backend endpoint."
+
+    - endpoint_ref: "CI_BIND_EP_VSDC_PROV_TAXCORE_VSDC_REMOTE"
+      role: "provider"
+      selected: true
+      required: true
+      addressing_mode: "remote_network"
+      security_profile_ref: "SP_REMOTE_TLS_CLIENT_CERT"
+      notes: "Remote V-SDC endpoint for online fiscalization."
+
+    - endpoint_ref: "CI_BIND_EP_MEDIA_PROV_REMOVABLE_MEDIA_IO_LOCAL"
+      role: "provider"
+      selected: true
+      required: false
+      addressing_mode: "other"
+      security_profile_ref: "SP_LOCAL_OPERATOR_CONTROLLED"
+      notes: "Optional removable media endpoint."
+
+storage_policy:
+  stores:
+    - store_ref: "FS_OFC_CONFIG"
+      binding_ref: "CB_BOOTSTRAP__FS_OFC_CONFIG_EMBEDDED"
+      transport: "local_fs"
+      root: "/ofc/config"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_until_replaced_by_approved_config"
+      encryption_at_rest: false
+      notes: "Configuration and locally cached bootstrap/shared data."
+
+    - store_ref: "FS_COUNTER_STORE"
+      binding_ref: "CB_ESIR__FS_COUNTER_STORE_EMBEDDED"
+      transport: "local_fs"
+      root: "/ofc/counters"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_for_system_lifetime"
+      encryption_at_rest: false
+      notes: "Receipt counters and sequence state."
+
+    - store_ref: "FS_LOCAL_AUDIT_JOURNAL"
+      binding_ref: "CB_ESDC__FS_LOCAL_AUDIT_JOURNAL_EMBEDDED"
+      transport: "local_fs"
+      root: "/ofc/audit_journal"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_until_successfully transferred and retention period satisfied"
+      encryption_at_rest: true
+      notes: "Critical local audit persistence for offline and sync lifecycle."
+
+    - store_ref: "FS_PROOF_STORE"
+      binding_ref: "CB_AUDIT_PROOF__FS_PROOF_STORE_EMBEDDED"
+      transport: "local_fs"
+      root: "/ofc/proof_store"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_according_to_fiscal_evidence_policy"
+      encryption_at_rest: true
+      notes: "Proof/evidence artifacts related to audit and verification lifecycle."
+
+    - store_ref: "FS_COMMAND_STATE"
+      binding_ref: "CB_STATUS_RECOVERY__FS_COMMAND_STATE_EMBEDDED"
+      transport: "local_fs"
+      root: "/ofc/command_state"
+      required: true
+      persistence: "durable"
+      backup_policy: "local_backup"
+      retention_policy: "retain_until_command_lifecycle_closed"
+      encryption_at_rest: false
+      notes: "Tracks backend commands and their local processing state."
+
+    - store_ref: "FS_EXPORT_STAGING"
+      binding_ref: "CB_EXPORT__FS_EXPORT_STAGING_EMBEDDED"
+      transport: "local_fs"
+      root: "/ofc/export_staging"
+      required: false
+      persistence: "persistent"
+      backup_policy: "none"
+      retention_policy: "retain_until_export_confirmed_or_cleared_by_operator"
+      encryption_at_rest: false
+      notes: "Optional staging area for local audit export packages."
+
+security_policy:
+  identity_context:
+    tenant_id: "TENANT_DEFAULT"
+    site_id: "SITE_PRIMARY"
+    device_id: "EMBEDDED_TERMINAL_01"
+    operator_scope: "LOCAL_OPERATOR"
+    fiscal_subject_ref: "FISCAL_SUBJECT_PRIMARY"
+
+  pki:
+    client_cert_context_ref: "PKI_CONTEXT_DEFAULT"
+    cert_source: "applet"
+    key_access_mode: "applet"
+    required: true
+    notes: "Local PKI context used for backend-facing authenticated calls."
+
+  taxcore_auth:
+    auth_mode: "client_certificate"
+    token_refresh_owner: "DEP_ESDC"
+    required: true
+    notes: "Authentication and token lifecycle are owned by E-SDC-side backend integration logic."
+
+  secure_element:
+    endpoint_ref: "CI_BIND_EP_SE_PROV_SECURE_ELEMENT_LOCAL"
+    access_mode: "local_apdu"
+    required: true
+    notes: "Hard requirement for local signing path."
+
+  secrets:
+    secret_source: "os_secure_store"
+    rotation_policy: "manual_or_operational_rotation_per_certificate_policy"
+    notes: "No plain-text secret files assumed by default."
+
+  trust_constraints:
+    - id: "TC_LOCAL_SIGNING_REMAINS_TENANT_LOCAL"
+      description: "Secure-element operations must remain tenant-local and must not be proxied through remote shared infrastructure."
+
+    - id: "TC_CLIENT_CERT_CONTEXT_REMAINS_LOCAL"
+      description: "Client certificate private-key access must remain in local trusted PKI context."
+
+network_policy:
+  connectivity_assumptions:
+    edge_initiated_outbound_only: false
+    inbound_edge_reachability_required: false
+    remote_operation_required: false
+
+  path_constraints:
+    - communication_path_ref: "CP_BA__ESIR__ESIR_SERVICE_EMBEDDED"
+      locality: "in_process"
+      allowed_transports:
+        - "in_process"
+      timeout_profile_ref: "TPROF_LOCAL_FAST"
+      retry_profile_ref: "RPROF_NO_RETRY_CALLER"
+      notes: "Business application and ESIR share same embedded device."
+
+    - communication_path_ref: "CP_ESIR__ESDC__ESDC_SERVICE_EMBEDDED"
+      locality: "same_host"
+      allowed_transports:
+        - "in_process"
+        - "ipc"
+      timeout_profile_ref: "TPROF_LOCAL_FAST"
+      retry_profile_ref: "RPROF_INTERNAL_SHORT_RETRY"
+      notes: "In-process preferred; same-host IPC allowed only if deployment is split later."
+
+    - communication_path_ref: "CP_ESDC__SE__SECURE_ELEMENT_EMBEDDED"
+      locality: "same_host"
+      allowed_transports:
+        - "local_apdu"
+        - "vendor_sdk"
+      timeout_profile_ref: "TPROF_DEVICE_IO"
+      retry_profile_ref: "RPROF_DEVICE_IO_LIMITED"
+      notes: "Critical local device path."
+
+    - communication_path_ref: "CP_ESDC__PKI__CLIENT_CERT_CONTEXT_EMBEDDED"
+      locality: "same_host"
+      allowed_transports:
+        - "local_api"
+        - "applet"
+      timeout_profile_ref: "TPROF_DEVICE_IO"
+      retry_profile_ref: "RPROF_DEVICE_IO_LIMITED"
+      notes: "Local PKI context access."
+
+    - communication_path_ref: "CP_ESDC__TCS__TAXCORE_SHARED_EMBEDDED"
+      locality: "internet"
+      allowed_transports:
+        - "https_json"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_REMOTE_BOUNDED"
+      notes: "Bootstrap / shared-data fetch path."
+
+    - communication_path_ref: "CP_ESIR__VSDC__TAXCORE_VSDC_EMBEDDED"
+      locality: "internet"
+      allowed_transports:
+        - "https_json_mtls"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_REMOTE_BOUNDED"
+      notes: "Online fiscalization path."
+
+    - communication_path_ref: "CP_ESDC__TCB__TAXCORE_ESDC_BACKEND_EMBEDDED"
+      locality: "internet"
+      allowed_transports:
+        - "https_json_auth"
+      timeout_profile_ref: "TPROF_REMOTE_STANDARD"
+      retry_profile_ref: "RPROF_BACKGROUND_RETRY"
+      notes: "Backend sync and command lifecycle path."
+
+    - communication_path_ref: "CP_ESDC__MEDIA__REMOVABLE_MEDIA_IO_EMBEDDED"
+      locality: "same_host"
+      allowed_transports:
+        - "filesystem"
+      timeout_profile_ref: "TPROF_DEVICE_IO"
+      retry_profile_ref: "RPROF_NO_AUTORETRY_OPERATOR_ACTION"
+      notes: "Operator-triggered export path."
+
+feature_toggles:
+  ba_local_fiscalization_autonomy_enabled: true
+  tenant_local_offline_evidence_enabled: true
+  local_audit_export_enabled: true
+  public_verification_enabled: true
+  hosted_access_enabled: false
+  operator_console_enabled: false
+  backend_sync_enabled: true
+  command_processing_enabled: true
+  proof_lifecycle_enabled: true
+
+bootstrap_policy:
+  startup_sequence_refs:
+    - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+  required_preconditions:
+    - "local_config_store_accessible"
+    - "counter_store_accessible"
+    - "audit_journal_accessible"
+    - "pki_context_declared"
+    - "secure_element_binding_declared"
+  fail_fast_conditions:
+    - "config_missing_or_invalid"
+    - "counter_store_unavailable"
+    - "audit_journal_unavailable"
+    - "mandatory_binding_missing"
+  readiness_gate_refs:
+    - "RG_CONFIG_LOADED"
+    - "RG_ESIR_INITIALIZED"
+    - "RG_ESDC_INITIALIZED"
+    - "RG_COUNTER_STORE_READY"
+    - "RG_AUDIT_JOURNAL_READY"
+  reload_policy: "static_on_boot"
+  notes: "Boot with approved config, restore local state, and enter serving state only after mandatory local stores and runtime modules are ready."
+
+degraded_mode_policy:
+  rules:
+    - id: "R_VSDC_UNAVAILABLE_FALLBACK_TO_LOCAL_ESDC"
+      trigger: "remote_vsdc_unreachable_or_online_path_rejected"
+      affected_connectors:
+        - "C_ESIR__VSDC__TAXCORE_VSDC"
+        - "C_ESIR__ESDC__ESDC_SERVICE"
+      behavior: "fallback"
+      fallback_binding_ref: "CI_BIND_CB_ESIR__ESDC__ESDC_SERVICE_EMBEDDED"
+      operator_visibility: "recommended"
+      recovery_condition: "remote_vsdc_reachable_and_online_path_restored"
+      notes: "Prefer online path when available, but allow local E-SDC path when online fiscalization path cannot be used."
+
+    - id: "R_TCB_UNAVAILABLE_DEFER_BACKEND_SYNC"
+      trigger: "taxcore_backend_unreachable"
+      affected_connectors:
+        - "C_ESDC__TCB__TAXCORE_ESDC_BACKEND"
+      behavior: "queue"
+      fallback_binding_ref: ""
+      operator_visibility: "recommended"
+      recovery_condition: "backend_reachable_and_sync_scheduler_resumes"
+      notes: "Audit transfer and command sync are deferred while local evidence remains preserved."
+
+    - id: "R_TCS_UNAVAILABLE_USE_CACHED_SHARED_DATA"
+      trigger: "taxcore_shared_unreachable"
+      affected_connectors:
+        - "C_ESDC__TCS__TAXCORE_SHARED"
+      behavior: "defer"
+      fallback_binding_ref: ""
+      operator_visibility: "recommended"
+      recovery_condition: "taxcore_shared_reachable_and_refresh_succeeds"
+      notes: "Use previously cached shared/bootstrap data when policy allows."
+
+    - id: "R_SE_UNAVAILABLE_FAIL_FISCALIZATION"
+      trigger: "secure_element_unreachable_or_signing_failed_nonrecoverably"
+      affected_connectors:
+        - "C_ESDC__SE__SECURE_ELEMENT"
+      behavior: "fail"
+      fallback_binding_ref: ""
+      operator_visibility: "required"
+      recovery_condition: "secure_element_reachable_and_signing_path_restored"
+      notes: "No local-signing fallback exists without secure element."
+
+    - id: "R_MEDIA_UNAVAILABLE_KEEP_EXPORT_PENDING"
+      trigger: "removable_media_not_present_or_write_failed"
+      affected_connectors:
+        - "C_ESDC__MEDIA__REMOVABLE_MEDIA_IO"
+      behavior: "defer"
+      fallback_binding_ref: ""
+      operator_visibility: "recommended"
+      recovery_condition: "removable_media_present_and_export_retried_successfully"
+      notes: "Export remains pending in staging area until operator retries."
+
+health_policy:
+  readiness_requirements:
+    - "config_loaded"
+    - "esir_ready"
+    - "esdc_ready"
+    - "counter_store_ready"
+    - "audit_journal_ready"
+
+  liveness_requirements:
+    - "bootstrap_completed"
+    - "embedded_runtime_responsive"
+    - "main_service_loop_operational"
+
+  serving_state_policy:
+    initial_state_ref: "SERVING_BOOTSTRAPPING"
+    ready_state_refs:
+      - "SERVING_READY"
+    degraded_state_refs:
+      - "SERVING_DEGRADED_OFFLINE_CAPABLE"
+    blocked_state_refs:
+      - "SERVING_BLOCKED"
+
+observability_policy:
+  logging_level: "required"
+  audit_trail_enabled: true
+  mandatory_event_refs: []
+  correlation_fields:
+    - "tenant_id"
+    - "site_id"
+    - "device_id"
+    - "request_id"
+    - "invoice_id"
+    - "audit_package_id"
+  alarm_rules:
+    - id: "ALARM_SECURE_ELEMENT_UNAVAILABLE"
+      trigger: "secure_element_unreachable"
+      severity: "critical"
+      operator_visibility: "required"
+
+    - id: "ALARM_BACKEND_SYNC_BACKLOG"
+      trigger: "backend_sync_backlog_exceeds_policy"
+      severity: "warning"
+      operator_visibility: "recommended"
+
+    - id: "ALARM_COUNTER_STORE_FAILURE"
+      trigger: "counter_store_unavailable_or_corrupt"
+      severity: "critical"
+      operator_visibility: "required"
+
+export_policy:
+  removable_media_required: false
+  supported_media_types:
+    - "usb_mass_storage"
+    - "sd_card"
+  staging_store_ref: "FS_EXPORT_STAGING"
+  export_format_refs:
+    - "AUDIT_EXPORT_PACKAGE_V1"
+  operator_confirmation_required: true
+  notes: "Local audit export is operator-triggered and may remain pending until removable media is available."
+
+analysis_notes:
+  assumptions:
+    - "Embedded business application and Open Fiscal Core share the same physical device."
+    - "Default BA -> ESIR and ESIR -> E-SDC bindings are local and in-process."
+    - "Public verification enablement means generation and preservation of verification data for externally reachable public verification, not direct system-owned runtime invocation of public verification service."
+    - "endpoint_selection enumerates provider endpoints selected for this deployment; consumer_endpoint_ref values remain binding-level references."
+    - "Shared/bootstrap data may be cached locally when policy permits."
+  open_issues:
+    - "Backfill concrete CM catalogue refs for consumer endpoints and transport profiles."
+    - "Backfill formal event refs once observability catalogue is finalized."
+    - "Replace serving state placeholders with final state artifact refs when state views are completed."

@@ -1,0 +1,363 @@
+@startuml
+title DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT - Data View (logical)
+
+hide empty members
+skinparam classAttributeIconSize 0
+skinparam Shadowing false
+
+' Conventions for parser (deterministic):
+' - IDs: ST_* store, E_* entity, AP_* access_pattern, BND_* binding, CORR_* correspondence
+' - Defaults: payload.format=json, payload.content_type=application/json unless overridden
+' - Stored record names under OFC_STORAGE.* are internal logical record shapes for this slice
+
+note top
+  Focused slice for backend authentication, command persistence,
+  readiness and recovery snapshots, and export staging.
+
+  Bootstrap access patterns that also touch command/recovery state are
+  defined in DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS.
+
+  Cross-slice entity dependencies referenced here but defined primarily in
+  DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF:
+  - E_AUDIT_BACKLOG_INDEX
+  - E_AUDIT_PACKAGE_RECORD
+  - E_AUDIT_REQUEST_PAYLOAD_RECORD
+  - E_PROOF_CYCLE_RECORD
+end note
+
+package "Stores" {
+  class "ST_COMMAND_RECOVERY_STATE" as ST_COMMAND_RECOVERY_STATE {
+    kind=logical_store
+    owner=DEP_ESDC+DEP_STATUS_RECOVERY
+    boundary=internal
+    access=record_store
+    durability=durable
+    consistency=strong
+    gov.allowed_writers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY
+    gov.allowed_readers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY+DEP_REMOTE_COORDINATION
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_for_backend_alignment_and_operator_recovery
+    gov.delete_policy=replace_or_compact_per_retention_policy
+    gov.exportability=restricted_operator_support
+  }
+
+  class "ST_EXPORT_STAGING_STATE" as ST_EXPORT_STAGING_STATE {
+    kind=logical_store
+    owner=DEP_EXPORT
+    boundary=internal
+    access=record_store
+    durability=durable
+    consistency=strong
+    gov.allowed_writers=DEP_EXPORT
+    gov.allowed_readers=DEP_EXPORT+DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended
+    gov.retention_basis=retain_until_export_outcome_closed
+    gov.delete_policy=replace_or_prune_after_export_window
+    gov.exportability=operator_visible
+  }
+}
+
+package "Entities - command and recovery" {
+  class "E_BACKEND_AUTH_CONTEXT" as E_BACKEND_AUTH_CONTEXT {
+    store=ST_COMMAND_RECOVERY_STATE
+    owner=DEP_ESDC+DEP_BOOTSTRAP
+    mutability=mutable
+    pk=OFC_STORAGE.BackendAuthScopeKey
+    payload=AuthenticationTokenResponse
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_ESDC+DEP_BOOTSTRAP
+    gov.allowed_readers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_while_token_is_valid_or_until_replaced
+    gov.delete_policy=replace_on_refresh_or_expiry
+    gov.exportability=not_operator_exported
+    inv.cache_until=AuthenticationTokenResponse.expiresAt
+  }
+
+  class "E_BACKEND_COMMAND_RECORD" as E_BACKEND_COMMAND_RECORD {
+    store=ST_COMMAND_RECOVERY_STATE
+    owner=DEP_ESDC+DEP_BOOTSTRAP
+    mutability=mutable
+    pk=Command.commandId
+    nk.uid=Command.uid
+    payload=Command
+    meta=OFC_STORAGE.CommandLifecycleMeta
+    gov.allowed_writers=DEP_ESDC+DEP_BOOTSTRAP
+    gov.allowed_readers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_until_acknowledged_and_compacted
+    gov.delete_policy=compact_after_ack_and_support_window
+    gov.exportability=restricted_operator_support
+    inv.local_processing_outcome_in_meta=true
+  }
+
+  class "E_BACKEND_COMMAND_INDEX" as E_BACKEND_COMMAND_INDEX {
+    store=ST_COMMAND_RECOVERY_STATE
+    owner=DEP_ESDC+DEP_BOOTSTRAP
+    mutability=mutable
+    pk=OFC_STORAGE.CommandScopeKey
+    payload=OFC_STORAGE.CommandIndex
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_ESDC+DEP_BOOTSTRAP
+    gov.allowed_readers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_while_related_commands_exist
+    gov.delete_policy=rebuild_or_compact_when_empty
+    gov.exportability=restricted_operator_support
+    inv.rebuildable_from=E_BACKEND_COMMAND_RECORD
+  }
+
+  class "E_READINESS_RECOVERY_SNAPSHOT" as E_READINESS_RECOVERY_SNAPSHOT {
+    store=ST_COMMAND_RECOVERY_STATE
+    owner=DEP_STATUS_RECOVERY
+    mutability=mutable
+    pk=OFC_STORAGE.RecoveryScopeKey
+    payload=OFC_STORAGE.ReadinessRecoverySnapshot
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_STATUS_RECOVERY+DEP_BOOTSTRAP+DEP_ESDC
+    gov.allowed_readers=DEP_STATUS_RECOVERY+DEP_BOOTSTRAP+DEP_ESIR+DEP_ESDC
+    gov.enc_at_rest=required
+    gov.retention_basis=retain_latest_snapshot_and_last_known_good_state
+    gov.delete_policy=replace_only
+    gov.exportability=restricted_operator_support
+    inv.last_known_good_and_current_state_may_coexist=true
+  }
+}
+
+package "Entities - export staging" {
+  class "E_EXPORT_BATCH_RECORD" as E_EXPORT_BATCH_RECORD {
+    store=ST_EXPORT_STAGING_STATE
+    owner=DEP_EXPORT
+    mutability=mutable
+    pk=OFC_STORAGE.ExportBatchRef
+    payload=OFC_STORAGE.ExportBatchRecord
+    meta=OFC_STORAGE.ExportMeta
+    gov.allowed_writers=DEP_EXPORT
+    gov.allowed_readers=DEP_EXPORT+DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended
+    gov.retention_basis=retain_until_export_outcome_closes
+    gov.delete_policy=prune_after_export_window
+    gov.exportability=operator_visible
+    inv.scope_is_uid_and_environment_bound=true
+  }
+
+  class "E_STAGED_MEDIA_ARTIFACT_RECORD" as E_STAGED_MEDIA_ARTIFACT_RECORD {
+    store=ST_EXPORT_STAGING_STATE
+    owner=DEP_EXPORT
+    mutability=mutable
+    pk=OFC_STORAGE.MediaArtifactRef
+    nk.export_batch_ref=OFC_STORAGE.ExportBatchRef
+    payload=OFC_STORAGE.StagedMediaArtifactRecord
+    meta=OFC_STORAGE.StoredRecordMeta
+    gov.allowed_writers=DEP_EXPORT
+    gov.allowed_readers=DEP_EXPORT+DEP_ESDC
+    gov.enc_at_rest=recommended
+    gov.retention_basis=retain_until_media_write_attempt_is_closed
+    gov.delete_policy=replace_or_prune_after_export_window
+    gov.exportability=operator_visible
+    inv.filename_policy_is_design_assumption=true
+  }
+
+  class "E_EXPORT_RESULT_RECORD" as E_EXPORT_RESULT_RECORD {
+    store=ST_EXPORT_STAGING_STATE
+    owner=DEP_EXPORT
+    mutability=mutable
+    pk=OFC_STORAGE.ExportBatchRef
+    payload=OFC_STORAGE.ExportResultRecord
+    meta=OFC_STORAGE.ExportMeta
+    gov.allowed_writers=DEP_EXPORT
+    gov.allowed_readers=DEP_EXPORT+DEP_ESDC+DEP_STATUS_RECOVERY
+    gov.enc_at_rest=recommended
+    gov.retention_basis=retain_latest_outcome_per_export_batch
+    gov.delete_policy=replace_or_prune_after_support_window
+    gov.exportability=operator_visible
+    inv.media_command_results_and_export_outcome_may_coexist=true
+  }
+}
+
+package "AccessPatterns" {
+  class "AP_CACHE_BACKEND_AUTH_CONTEXT" as AP_CACHE_BACKEND_AUTH_CONTEXT {
+    owner=DEP_ESDC
+    op=cache_backend_auth_context
+    scenario=S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    steps=S1.1+S1.4+S1.5
+    read.1=E_BACKEND_AUTH_CONTEXT:by_pk:strong_optional
+    write.1=E_BACKEND_AUTH_CONTEXT:upsert
+  }
+
+  class "AP_CAPTURE_BACKEND_COMMANDS" as AP_CAPTURE_BACKEND_COMMANDS {
+    owner=DEP_ESDC
+    op=capture_backend_commands
+    scenario=S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    steps=S2.1r+S3.1+S3.2+S3.3+S3.4+S4.1r+S4.2+S4.3+S4.4+S4.5+S5.1r+S5.2+S5.3+S5.4+S5.5
+    read.1=E_BACKEND_COMMAND_INDEX:by_pk:strong_optional
+    write.N1=E_BACKEND_COMMAND_RECORD:insert_or_replace
+    write.1=E_BACKEND_COMMAND_INDEX:upsert
+    write.2=E_READINESS_RECOVERY_SNAPSHOT:update_best_effort
+  }
+
+  class "AP_READ_AND_PERSIST_RECOVERY_STATE" as AP_READ_AND_PERSIST_RECOVERY_STATE {
+    owner=DEP_STATUS_RECOVERY
+    op=read_and_persist_recovery_state
+    scenario=S_SYS_STATUS_AND_OPERATOR_RECOVERY
+    steps=S2.1+S3.1r+S4.1+S4.2+S4.3+S4a.1+S5.6+S5a.1+S5a.2
+    read.1=E_ENVIRONMENT_BINDING_RECORD:by_pk:strong_optional
+    read.2=E_BACKEND_AUTH_CONTEXT:by_pk:strong_optional
+    read.3=E_AUDIT_BACKLOG_INDEX:by_pk:strong_optional
+    read.4=E_PROOF_CYCLE_RECORD:by_pk:strong_optional
+    write.1=E_READINESS_RECOVERY_SNAPSHOT:upsert
+  }
+
+  class "AP_STAGE_LOCAL_AUDIT_EXPORT" as AP_STAGE_LOCAL_AUDIT_EXPORT {
+    owner=DEP_EXPORT
+    op=stage_local_audit_export
+    scenario=S_SYS_LOCAL_AUDIT_EXPORT
+    steps=S2.1+S3.1+S3.2+S3.3+S4.1+S4.2+S4.3+S5.1+S6.1+S7.1+S7.2
+    read.1=E_AUDIT_BACKLOG_INDEX:by_pk:strong
+    read.N1=E_AUDIT_PACKAGE_RECORD:by_index:strong
+    read.2=E_AUDIT_REQUEST_PAYLOAD_RECORD:by_pk:strong_optional
+    write.1=E_EXPORT_BATCH_RECORD:insert_or_replace
+    write.N1=E_STAGED_MEDIA_ARTIFACT_RECORD:insert_or_replace
+    write.2=E_EXPORT_RESULT_RECORD:upsert
+  }
+
+  class "AP_RECORD_LOCAL_EXPORT_OUTCOME" as AP_RECORD_LOCAL_EXPORT_OUTCOME {
+    owner=DEP_EXPORT
+    op=record_local_export_outcome
+    scenario=S_SYS_LOCAL_AUDIT_EXPORT
+    steps=S8.1+S8.2+S8.3
+    read.1=E_EXPORT_BATCH_RECORD:by_pk:strong
+    write.1=E_EXPORT_RESULT_RECORD:upsert
+    read.2=E_AUDIT_BACKLOG_INDEX:by_pk:strong
+    write.2=E_AUDIT_BACKLOG_INDEX:update_best_effort
+  }
+}
+
+package "Bindings" {
+  class "BND_EMBEDDED_LOCAL_FS" as BND_EMBEDDED_LOCAL_FS {
+    kind=tenant_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+
+    fs.root.command=/ofc/command_state
+    fs.root.export=/ofc/export_staging
+
+    fs.path.auth_context={command}/auth/{backend_scope}/authentication_token.json
+    fs.path.command_record={command}/commands/{command_id}.json
+    fs.path.command_index={command}/commands/index/{backend_scope}.json
+    fs.path.readiness_snapshot={command}/readiness/{scope}/current_snapshot.json
+    fs.path.export_batch={export}/batches/{export_batch_ref}.json
+    fs.path.staged_media_artifact={export}/batches/{export_batch_ref}/artifacts/{artifact_ref}.json
+    fs.path.export_result={export}/batches/{export_batch_ref}/result.json
+
+    atomicity.write_policy=temp_write_then_rename
+    repair.command_index_rebuildable=true
+
+    apply=[E_BACKEND_AUTH_CONTEXT,E_BACKEND_COMMAND_RECORD,E_BACKEND_COMMAND_INDEX,E_READINESS_RECOVERY_SNAPSHOT,E_EXPORT_BATCH_RECORD,E_STAGED_MEDIA_ARTIFACT_RECORD,E_EXPORT_RESULT_RECORD]
+  }
+
+  class "BND_LOCAL_SERVICE_LOCAL_FS" as BND_LOCAL_SERVICE_LOCAL_FS {
+    kind=tenant_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST+PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+
+    fs.root.command=/srv/ofc/command_state
+    fs.root.export=/srv/ofc/export_staging
+
+    fs.path.auth_context={command}/auth/{backend_scope}/authentication_token.json
+    fs.path.command_record={command}/commands/{command_id}.json
+    fs.path.command_index={command}/commands/index/{backend_scope}.json
+    fs.path.readiness_snapshot={command}/readiness/{scope}/current_snapshot.json
+    fs.path.export_batch={export}/batches/{export_batch_ref}.json
+    fs.path.staged_media_artifact={export}/batches/{export_batch_ref}/artifacts/{artifact_ref}.json
+    fs.path.export_result={export}/batches/{export_batch_ref}/result.json
+
+    atomicity.write_policy=temp_write_then_rename
+    repair.command_index_rebuildable=true
+
+    apply=[E_BACKEND_AUTH_CONTEXT,E_BACKEND_COMMAND_RECORD,E_BACKEND_COMMAND_INDEX,E_READINESS_RECOVERY_SNAPSHOT,E_EXPORT_BATCH_RECORD,E_STAGED_MEDIA_ARTIFACT_RECORD,E_EXPORT_RESULT_RECORD]
+  }
+
+  class "BND_HOSTED_ACCESS_EDGE_LOCAL_FS" as BND_HOSTED_ACCESS_EDGE_LOCAL_FS {
+    kind=tenant_edge_local_fs
+    substrate=filesystem
+    path_policy=dedicated_root_per_physical_store
+    applies_to=PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+
+    fs.root.command=/srv/ofc_edge/command_state
+    fs.root.export=/srv/ofc_edge/export_staging
+
+    fs.path.auth_context={command}/auth/{backend_scope}/authentication_token.json
+    fs.path.command_record={command}/commands/{command_id}.json
+    fs.path.command_index={command}/commands/index/{backend_scope}.json
+    fs.path.readiness_snapshot={command}/readiness/{scope}/current_snapshot.json
+    fs.path.export_batch={export}/batches/{export_batch_ref}.json
+    fs.path.staged_media_artifact={export}/batches/{export_batch_ref}/artifacts/{artifact_ref}.json
+    fs.path.export_result={export}/batches/{export_batch_ref}/result.json
+
+    atomicity.write_policy=temp_write_then_rename
+    repair.command_index_rebuildable=true
+
+    apply=[E_BACKEND_AUTH_CONTEXT,E_BACKEND_COMMAND_RECORD,E_BACKEND_COMMAND_INDEX,E_READINESS_RECOVERY_SNAPSHOT,E_EXPORT_BATCH_RECORD,E_STAGED_MEDIA_ARTIFACT_RECORD,E_EXPORT_RESULT_RECORD]
+  }
+}
+
+package "Correspondences" {
+  class "CORR_AUTH_CONTEXT_PAYLOAD" as CORR_AUTH_CONTEXT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=AuthenticationTokenResponse
+    to=E_BACKEND_AUTH_CONTEXT
+  }
+
+  class "CORR_COMMAND_PAYLOAD" as CORR_COMMAND_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=Command
+    to=E_BACKEND_COMMAND_RECORD
+  }
+
+  class "CORR_COMMAND_INDEX_PAYLOAD" as CORR_COMMAND_INDEX_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.CommandIndex
+    to=E_BACKEND_COMMAND_INDEX
+  }
+
+  class "CORR_READINESS_RECOVERY_PAYLOAD" as CORR_READINESS_RECOVERY_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.ReadinessRecoverySnapshot
+    to=E_READINESS_RECOVERY_SNAPSHOT
+  }
+
+  class "CORR_EXPORT_BATCH_PAYLOAD" as CORR_EXPORT_BATCH_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.ExportBatchRecord
+    to=E_EXPORT_BATCH_RECORD
+  }
+
+  class "CORR_STAGED_MEDIA_ARTIFACT_PAYLOAD" as CORR_STAGED_MEDIA_ARTIFACT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.StagedMediaArtifactRecord
+    to=E_STAGED_MEDIA_ARTIFACT_RECORD
+  }
+
+  class "CORR_EXPORT_RESULT_PAYLOAD" as CORR_EXPORT_RESULT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=OFC_STORAGE.ExportResultRecord
+    to=E_EXPORT_RESULT_RECORD
+  }
+
+  class "CORR_OP_COMMAND_CAPTURE_WRITES" as CORR_OP_COMMAND_CAPTURE_WRITES {
+    kind=operation_writes_entities
+    from=AP_CAPTURE_BACKEND_COMMANDS
+    to=[E_BACKEND_COMMAND_RECORD,E_BACKEND_COMMAND_INDEX,E_READINESS_RECOVERY_SNAPSHOT]
+  }
+
+  class "CORR_OP_EXPORT_WRITES" as CORR_OP_EXPORT_WRITES {
+    kind=operation_writes_entities
+    from=AP_STAGE_LOCAL_AUDIT_EXPORT
+    to=[E_EXPORT_BATCH_RECORD,E_STAGED_MEDIA_ARTIFACT_RECORD,E_EXPORT_RESULT_RECORD]
+  }
+}
+
+@enduml

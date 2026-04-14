@@ -16,9 +16,6 @@
 [submodule "eng/docs/sources/Taxcore-MobilePOS-Android"]
 	path = eng/docs/sources/Taxcore-MobilePOS-Android
 	url = https://github.com/Data-Tech-International/Taxcore-MobilePOS-Android.git
-[submodule "eng/docs/sources/agent_skills"]
-	path = eng/docs/sources/agent_skills
-	url = git@github.com:naucnikumetnik/agent_skills.git
 [submodule "eng/docs/skills/agent_skills"]
 	path = eng/docs/skills/agent_skills
 	url = git@github.com:naucnikumetnik/agent_skills.git

@@ -30,14 +30,14 @@ note over ESDC, TCB
   Proof-of-audit is a separate cycle built from Start Audit + Amount Status.
 end note
 
-group S1 "Detect pending audit obligations"
+group S1 "GRP_AUDIT_DETECT_PENDING_OBLIGATIONS"
   ESDC -> ESDC : detect pending AuditPackage backlog\n[step=S1.1]
   ESDC -> ESDC : determine whether proof cycle should start\n[step=S1.2]
 end
 
 alt [COND=audit_package_pending_and_connectivity_available]
 
-  group S2 "Submit pending audit package"
+  group S2 "GRP_AUDIT_SUBMIT_PENDING_PACKAGE"
     ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditPackage(data:AuditPackage) -> AuditDataStatus\n[step=S2.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-401 · HTTPS POST /api/v3/sdc/audit · TaxCoreAuthenticationToken]
     activate TCB
     TCB --> ESDC : [step=S2.1r]\n[vals result=AuditDataStatus(status, commands)]
@@ -46,7 +46,7 @@ alt [COND=audit_package_pending_and_connectivity_available]
 
   alt [COND=audit_response_contains_commands]
 
-    group S3 "Process commands returned with audit response"
+    group S3 "GRP_AUDIT_PROCESS_RETURNED_COMMANDS"
       loop [for each returned command]
         ESDC -> ESDC : apply command payload\n[step=S3.1]
 
@@ -61,13 +61,13 @@ alt [COND=audit_package_pending_and_connectivity_available]
 
   else [COND=no_commands_in_audit_response]
 
-    group S3a "Continue without returned commands"
+    group S3a "GRP_AUDIT_CONTINUE_WITHOUT_RETURNED_COMMANDS"
       ESDC -> ESDC : keep current command state\n[step=S3a.1]
     end
 
   end
 
-  group S4 "Determine audit package disposition"
+  group S4 "GRP_AUDIT_DETERMINE_PACKAGE_DISPOSITION"
     alt [COND=audit_status == verified_delete_local]
       ESDC -> ESDC : delete local AuditPackage copy\n[step=S4.1]
     else [COND=audit_status == retryable]
@@ -79,7 +79,7 @@ alt [COND=audit_package_pending_and_connectivity_available]
 
 else [COND=no_pending_audit_package_or_offline]
 
-  group S2a "Skip remote audit package submission"
+  group S2a "GRP_AUDIT_SKIP_REMOTE_SUBMISSION"
     ESDC -> ESDC : keep current audit backlog state\n[step=S2a.1]
   end
 
@@ -87,7 +87,7 @@ end
 
 alt [COND=proof_cycle_requested_or_due]
 
-  group S5 "Generate proof request inputs"
+  group S5 "GRP_PROOF_GENERATE_REQUEST_INPUTS"
     ESDC -> SE : IF_DEP_SECURE_ELEMENT.StartAuditApdu() -> AuditRequestPayload\n[step=S5.1]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
     activate SE
     SE --> ESDC : [step=S5.1r]\n[vals result=AuditRequestPayload]
@@ -99,7 +99,7 @@ alt [COND=proof_cycle_requested_or_due]
     ESDC -> ESDC : compose ProofOfAuditRequest from auditRequestPayload, sum, limit\n[step=S5.3]
   end
 
-  group S6 "Submit proof request"
+  group S6 "GRP_PROOF_SUBMIT_REQUEST"
     ESDC -> TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditRequestPayload(data:ProofOfAuditRequest)\n[step=S6.1]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-403 · HTTPS POST /api/v3/sdc/audit-proof · TaxCoreAuthenticationToken]
     activate TCB
     TCB --> ESDC : [step=S6.1r]\n[vals result=HTTP 200 OK]
@@ -107,7 +107,7 @@ alt [COND=proof_cycle_requested_or_due]
   end
 
   alt [COND=proof_command_available_via_backend_response]
-    group S7 "Complete proof cycle with returned command"
+    group S7 "GRP_PROOF_COMPLETE_WITH_RETURNED_COMMAND"
       ESDC -> ESDC : wait for proof-related command through backend command channels\n[step=S7.1]
       ESDC -> SE : IF_DEP_SECURE_ELEMENT.EndAuditApdu(proof:ProofOfAudit)\n[step=S7.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
       activate SE
@@ -115,20 +115,20 @@ alt [COND=proof_cycle_requested_or_due]
       deactivate SE
     end
   else [COND=proof_not_yet_available]
-    group S7a "Keep proof pending"
+    group S7a "GRP_PROOF_KEEP_PENDING"
       ESDC -> ESDC : keep proof cycle pending until backend generates command\n[step=S7a.1]
     end
   end
 
 else [COND=proof_cycle_not_requested]
 
-  group S5a "Skip proof cycle"
+  group S5a "GRP_PROOF_SKIP_CYCLE"
     ESDC -> ESDC : continue with audit backlog handling only\n[step=S5a.1]
   end
 
 end
 
-group S8 "Close audit outcome"
+group S8 "GRP_AUDIT_CLOSE_OUTCOME"
   ESDC -> ESDC : derive audit state\n[step=S8.1]
   ESDC -> ESDC : expose outcome as audit_cleared | audit_retry_pending |\nproof_pending | degraded\n[step=S8.2]
 end

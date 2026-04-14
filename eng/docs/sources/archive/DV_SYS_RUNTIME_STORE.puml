@@ -1,0 +1,542 @@
+@startuml
+title DV_DATA_RUNTIME_STORE — Data View (logical)
+
+hide empty members
+skinparam classAttributeIconSize 0
+skinparam Shadowing false
+
+' Conventions for parser (deterministic):
+' - IDs: ST_* store, E_* entity, AP_* access_pattern, BND_* binding, CORR_* correspondence
+' - Defaults: payload.format=json, payload.content_type=application/json unless overridden
+
+package "Stores" {
+  class "ST_RUNTIME_STORE_FS" as ST_RUNTIME_STORE_FS {
+    kind=filesystem
+    owner=SYS_RUNTIME_STORE
+    boundary=internal
+    access=fs
+    durability=durable
+    consistency=strong
+    deploy.zone=Z_LOCAL
+    deploy.node=N_WS
+    deploy.rb=RB_AIOS_BACKEND
+    gov.enc_at_rest=recommended
+  }
+}
+
+package "Entities — config / prepare / planning" {
+  class "E_PROJECT_PROFILE" as E_PROJECT_PROFILE {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=versioned
+    pk=TL_CORE.SingletonKey
+    payload=TL_RUNTIME_STORE.ProjectProfile
+    meta=TL_CORE.StoredRecordMeta
+    inv.required=true
+  }
+
+  class "E_CM_CATALOGUE" as E_CM_CATALOGUE {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=versioned
+    pk=TL_CORE.SingletonKey
+    payload=TL_RUNTIME_STORE.CMCatalogue
+    meta=TL_CORE.StoredRecordMeta
+    inv.required=true
+  }
+
+  class "E_PREPARED_EXECUTION_INTENT" as E_PREPARED_EXECUTION_INTENT {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=immutable
+    pk=TL_RUNTIME_STORE.PreparedExecutionIntentRef
+    payload=TL_RUNTIME_STORE.PreparedExecutionIntent
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_DRAFT_PLAN_DOCUMENT" as E_DRAFT_PLAN_DOCUMENT {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_CORE.PlanRef
+    payload=TL_RUNTIME_STORE.DraftPlanDocument
+    meta=TL_CORE.StoredRecordMeta
+    inv.contains=DraftExecutionPlan+DraftExecutionPlanSummary
+    inv.atomic_write=true
+  }
+}
+
+package "Entities — run execution" {
+  class "E_RUN_META" as E_RUN_META {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_RUNTIME_STORE.RunRef
+    payload=TL_RUNTIME_STORE.RunMeta
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_RUN_EXECUTION_PLAN" as E_RUN_EXECUTION_PLAN {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=immutable
+    pk=TL_RUNTIME_STORE.RunRef
+    payload=TL_RUNTIME_STORE.ExecutionPlan
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_TASK_RUNTIME_INDEX" as E_TASK_RUNTIME_INDEX {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_RUNTIME_STORE.RunRef
+    payload=TL_RUNTIME_STORE.TaskRuntimeIndex
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_BATCH_EXECUTION_UNIT" as E_BATCH_EXECUTION_UNIT {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_RUNTIME_STORE.BatchExecutionUnitId
+    nk.run_ref=TL_RUNTIME_STORE.RunRef
+    nk.task_id=TL_RUNTIME_STORE.TaskId
+    payload=TL_RUNTIME_STORE.BatchExecutionUnit
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_BATCH_EXECUTION_UNIT_INDEX" as E_BATCH_EXECUTION_UNIT_INDEX {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_RUNTIME_STORE.TaskScopedKey
+    payload=TL_RUNTIME_STORE.BatchExecutionUnitIndex
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+    inv.stable_order_required=true
+  }
+}
+
+package "Entities — attempts" {
+  class "E_BATCH_ATTEMPT_RECORD" as E_BATCH_ATTEMPT_RECORD {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=immutable
+    pk=TL_RUNTIME_STORE.BatchAttemptRef
+    nk.batch_execution_unit_ref=TL_RUNTIME_STORE.BatchExecutionUnitRef
+    payload=TL_RUNTIME_STORE.BatchAttemptRecord
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_BATCH_ATTEMPT_INDEX" as E_BATCH_ATTEMPT_INDEX {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_RUNTIME_STORE.BatchScopedKey
+    payload=TL_RUNTIME_STORE.AttemptIndex
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+    inv.derived_attempt_ordinals_monotonic=true
+  }
+}
+
+package "Entities — evidence" {
+  class "E_EVIDENCE_PAYLOAD" as E_EVIDENCE_PAYLOAD {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=immutable
+    pk=TL_RUNTIME_STORE.EvidenceId
+    payload=TL_RUNTIME_STORE.ExecutionEvidencePack
+    meta=TL_CORE.StoredBlobMeta
+    inv.atomic_write=true
+  }
+
+  class "E_EVIDENCE_META" as E_EVIDENCE_META {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=immutable
+    pk=TL_RUNTIME_STORE.EvidenceId
+    payload=TL_RUNTIME_STORE.EvidenceMeta
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+  }
+
+  class "E_EVIDENCE_INDEX" as E_EVIDENCE_INDEX {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=derived
+    pk=TL_RUNTIME_STORE.RunRef
+    payload=TL_RUNTIME_STORE.EvidenceIndex
+    meta=TL_CORE.StoredRecordMeta
+    inv.derived_from=E_EVIDENCE_META
+    inv.best_effort_update=true
+    inv.rebuildable=true
+  }
+}
+
+package "Entities — observability / progress" {
+  class "E_TELEMETRY_EVENT" as E_TELEMETRY_EVENT {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=append_only
+    pk=TL_RUNTIME_STORE.TelemetryEventRef
+    nk.scope_kind=TL_OBSERVABILITY.ObservableScopeKind
+    nk.scope_ref=TL_STRING
+    payload=TL_OBSERVABILITY.EventEnvelope
+    meta=TL_CORE.StoredRecordMeta
+    inv.append_only=true
+    inv.atomic_write=true
+  }
+
+  class "E_TIMELINE_INDEX" as E_TIMELINE_INDEX {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=mutable
+    pk=TL_RUNTIME_STORE.ObservableScopeKey
+    payload=TL_RUNTIME_STORE.TimelineIndex
+    meta=TL_CORE.StoredRecordMeta
+    inv.atomic_write=true
+    inv.rebuildable_from=E_TELEMETRY_EVENT
+  }
+
+  class "E_PROGRESS_SNAPSHOT" as E_PROGRESS_SNAPSHOT {
+    store=ST_RUNTIME_STORE_FS
+    owner=SYS_RUNTIME_STORE
+    mutability=derived
+    pk=TL_RUNTIME_STORE.RunRef
+    payload=TL_RUNTIME_STORE.ProgressSnapshot
+    meta=TL_CORE.DerivedMeta
+    inv.persisted=false
+    inv.derived_from=E_RUN_META+E_TIMELINE_INDEX
+  }
+}
+
+package "AccessPatterns" {
+  class "AP_GET_PROJECT_PROFILE" as AP_GET_PROJECT_PROFILE {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_project_profile
+    read.1=E_PROJECT_PROFILE:by_pk:strong
+  }
+
+  class "AP_RESOLVE_LOCATION" as AP_RESOLVE_LOCATION {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.resolve_location
+    read.1=E_CM_CATALOGUE:by_pk:strong
+    read.2=E_PROJECT_PROFILE:by_pk:strong
+  }
+
+  class "AP_PUT_PREPARED_EXECUTION_INTENT" as AP_PUT_PREPARED_EXECUTION_INTENT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.put_prepared_execution_intent
+    write.1=E_PREPARED_EXECUTION_INTENT:insert
+  }
+
+  class "AP_GET_PREPARED_EXECUTION_INTENT" as AP_GET_PREPARED_EXECUTION_INTENT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_prepared_execution_intent
+    read.1=E_PREPARED_EXECUTION_INTENT:by_pk:strong
+  }
+
+  class "AP_PUT_DRAFT_PLAN" as AP_PUT_DRAFT_PLAN {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.put_draft_execution_plan
+    write.1=E_DRAFT_PLAN_DOCUMENT:upsert
+  }
+
+  class "AP_GET_DRAFT_PLAN" as AP_GET_DRAFT_PLAN {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_draft_execution_plan
+    read.1=E_DRAFT_PLAN_DOCUMENT:by_pk:strong
+  }
+
+  class "AP_REJECT_DRAFT_PLAN" as AP_REJECT_DRAFT_PLAN {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.reject_draft_execution_plan
+    read.1=E_DRAFT_PLAN_DOCUMENT:by_pk:strong
+    write.1=E_DRAFT_PLAN_DOCUMENT:update
+  }
+
+  class "AP_ACTIVATE_DRAFT_PLAN" as AP_ACTIVATE_DRAFT_PLAN {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.activate_draft_execution_plan
+    read.1=E_DRAFT_PLAN_DOCUMENT:by_pk:strong
+    write.1=E_RUN_EXECUTION_PLAN:insert
+    write.2=E_RUN_META:insert
+    write.3=E_TASK_RUNTIME_INDEX:insert
+    write.4=E_DRAFT_PLAN_DOCUMENT:update
+  }
+
+  class "AP_GET_RUN_SELECTION_CONTEXT" as AP_GET_RUN_SELECTION_CONTEXT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_run_selection_context
+    read.1=E_RUN_META:by_pk:strong
+    read.2=E_RUN_EXECUTION_PLAN:by_pk:strong
+    read.3=E_TASK_RUNTIME_INDEX:by_pk:strong_optional
+  }
+
+  class "AP_GET_RUN_CLOSURE_CONTEXT" as AP_GET_RUN_CLOSURE_CONTEXT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_run_closure_context
+    read.1=E_RUN_META:by_pk:strong
+    read.2=E_RUN_EXECUTION_PLAN:by_pk:strong
+    read.3=E_TASK_RUNTIME_INDEX:by_pk:strong
+  }
+
+  class "AP_GET_TASK_BATCHING_CONTEXT" as AP_GET_TASK_BATCHING_CONTEXT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_task_batching_context
+    read.1=E_RUN_META:by_pk:strong
+    read.2=E_RUN_EXECUTION_PLAN:by_pk:strong
+    read.3=E_TASK_RUNTIME_INDEX:by_pk:strong
+    read.4=E_BATCH_EXECUTION_UNIT_INDEX:by_pk:strong_optional
+  }
+
+  class "AP_PUT_BATCH_EXECUTION_UNITS" as AP_PUT_BATCH_EXECUTION_UNITS {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.put_batch_execution_units
+    write.N1=E_BATCH_EXECUTION_UNIT:insert_or_replace
+    write.1=E_BATCH_EXECUTION_UNIT_INDEX:upsert
+  }
+
+  class "AP_GET_NEXT_BATCH_EXECUTION_UNIT" as AP_GET_NEXT_BATCH_EXECUTION_UNIT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_next_batch_execution_unit
+    read.1=E_TASK_RUNTIME_INDEX:by_pk:strong
+    read.2=E_BATCH_EXECUTION_UNIT_INDEX:by_pk:strong
+    read.N1=E_BATCH_EXECUTION_UNIT:by_pk:strong
+  }
+
+  class "AP_CREATE_BATCH_ATTEMPT" as AP_CREATE_BATCH_ATTEMPT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.create_batch_attempt
+    read.1=E_BATCH_EXECUTION_UNIT:by_pk:strong
+    read.2=E_BATCH_ATTEMPT_INDEX:by_pk:strong_optional
+    write.1=E_BATCH_ATTEMPT_RECORD:insert
+    write.2=E_BATCH_ATTEMPT_INDEX:upsert
+  }
+
+  class "AP_GET_BATCH_EXECUTION_UNIT_PAYLOAD" as AP_GET_BATCH_EXECUTION_UNIT_PAYLOAD {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_batch_execution_unit_payload
+    read.1=E_BATCH_EXECUTION_UNIT:by_pk:strong
+  }
+
+  class "AP_PUT_EVIDENCE_BLOB" as AP_PUT_EVIDENCE_BLOB {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.put_evidence_blob
+    write.1=E_EVIDENCE_PAYLOAD:insert
+    write.2=E_EVIDENCE_META:insert
+    write.3=E_EVIDENCE_INDEX:update_best_effort
+  }
+
+  class "AP_GET_TASK_CLOSURE_CONTEXT" as AP_GET_TASK_CLOSURE_CONTEXT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_task_closure_context
+    read.1=E_TASK_RUNTIME_INDEX:by_pk:strong
+    read.2=E_BATCH_EXECUTION_UNIT_INDEX:by_pk:strong
+    read.N1=E_BATCH_EXECUTION_UNIT:by_pk:strong
+  }
+
+  class "AP_APPLY_PATCH" as AP_APPLY_PATCH {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.apply_patch
+    patchable_targets=[E_RUN_META,E_DRAFT_PLAN_DOCUMENT,E_TASK_RUNTIME_INDEX,E_BATCH_EXECUTION_UNIT]
+    read.1=PATCH_TARGET:strong
+    write.1=PATCH_TARGET:update
+    policy.precondition_check=true
+    policy.optional_etag=true
+  }
+
+  class "AP_APPEND_TELEMETRY" as AP_APPEND_TELEMETRY {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.append_telemetry
+    write.1=E_TELEMETRY_EVENT:append
+    read.1=E_TIMELINE_INDEX:by_pk:strong_optional
+    write.2=E_TIMELINE_INDEX:upsert
+  }
+
+  class "AP_GET_PROGRESS_SNAPSHOT" as AP_GET_PROGRESS_SNAPSHOT {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_progress_snapshot
+    read.1=E_RUN_META:by_pk:strong
+    read.2=E_TIMELINE_INDEX:by_pk:strong_optional
+    derive.1=E_PROGRESS_SNAPSHOT
+  }
+
+  class "AP_GET_PROGRESS_SUBSCRIPTION_TARGET" as AP_GET_PROGRESS_SUBSCRIPTION_TARGET {
+    owner=SYS_RUNTIME_STORE
+    op=IF_SYS_RUNTIME_STORE.get_progress_subscription_target
+    read.1=E_RUN_META:by_pk:strong
+  }
+}
+
+package "Bindings" {
+  class "BND_RUNTIME_STORE_AIOS_FS" as BND_RUNTIME_STORE_AIOS_FS {
+    store=ST_RUNTIME_STORE_FS
+    kind=aios_fs
+    fs.root=.aios
+
+    fs.path.project_profile=config/project_profile.json
+    fs.path.cm_catalogue=config/cm_catalogue.json
+
+    fs.path.prepared_intent=runtime/prepared_intents/{prepared_intent_ref}.json
+    fs.path.draft_plan=runtime/plans/{plan_ref}/draft_plan.json
+
+    fs.path.run_meta=runtime/runs/{run_ref}/run_meta.json
+    fs.path.execution_plan=runtime/runs/{run_ref}/execution_plan.json
+    fs.path.task_runtime_index=runtime/runs/{run_ref}/task_runtime_index.json
+
+    fs.path.batch_execution_unit=runtime/runs/{run_ref}/tasks/{task_id}/batches/{batch_execution_unit_id}.json
+    fs.path.batch_execution_unit_index=runtime/runs/{run_ref}/tasks/{task_id}/batch_execution_unit_index.json
+
+    fs.path.batch_attempt_record=runtime/runs/{run_ref}/tasks/{task_id}/batches/{batch_execution_unit_id}/attempts/{batch_attempt_ref}.json
+    fs.path.batch_attempt_index=runtime/runs/{run_ref}/tasks/{task_id}/batches/{batch_execution_unit_id}/attempt_index.json
+
+    fs.path.evidence_payload=runtime/runs/{run_ref}/evidence/{evidence_id}/payload.json
+    fs.path.evidence_meta=runtime/runs/{run_ref}/evidence/{evidence_id}/meta.json
+    fs.path.evidence_index=runtime/runs/{run_ref}/evidence/index.json
+
+    fs.path.telemetry_event=runtime/activity/{scope_kind}/{scope_ref}/events/{telemetry_event_ref}.json
+    fs.path.timeline_index=runtime/activity/{scope_kind}/{scope_ref}/timeline_index.json
+
+    atomicity.write_policy=temp_write_then_rename
+    atomicity.event_overwrite=false
+    atomicity.optional_etag_supported=true
+    repair.timeline_index_rebuildable=true
+    repair.evidence_index_rebuildable=true
+
+    apply=[E_PROJECT_PROFILE,E_CM_CATALOGUE,E_PREPARED_EXECUTION_INTENT,E_DRAFT_PLAN_DOCUMENT,E_RUN_META,E_RUN_EXECUTION_PLAN,E_TASK_RUNTIME_INDEX,E_BATCH_EXECUTION_UNIT,E_BATCH_EXECUTION_UNIT_INDEX,E_BATCH_ATTEMPT_RECORD,E_BATCH_ATTEMPT_INDEX,E_EVIDENCE_PAYLOAD,E_EVIDENCE_META,E_EVIDENCE_INDEX,E_TELEMETRY_EVENT,E_TIMELINE_INDEX]
+  }
+}
+
+package "Correspondences" {
+  class "CORR_PROFILE_PAYLOAD" as CORR_PROFILE_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.ProjectProfile
+    to=E_PROJECT_PROFILE
+  }
+
+  class "CORR_CM_CATALOGUE_PAYLOAD" as CORR_CM_CATALOGUE_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.CMCatalogue
+    to=E_CM_CATALOGUE
+  }
+
+  class "CORR_PREPARED_INTENT_PAYLOAD" as CORR_PREPARED_INTENT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.PreparedExecutionIntent
+    to=E_PREPARED_EXECUTION_INTENT
+  }
+
+  class "CORR_DRAFT_PLAN_DOC_PAYLOAD" as CORR_DRAFT_PLAN_DOC_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.DraftPlanDocument
+    to=E_DRAFT_PLAN_DOCUMENT
+  }
+
+  class "CORR_RUN_META_PAYLOAD" as CORR_RUN_META_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.RunMeta
+    to=E_RUN_META
+  }
+
+  class "CORR_EXECUTION_PLAN_PAYLOAD" as CORR_EXECUTION_PLAN_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.ExecutionPlan
+    to=E_RUN_EXECUTION_PLAN
+  }
+
+  class "CORR_TASK_RUNTIME_INDEX_PAYLOAD" as CORR_TASK_RUNTIME_INDEX_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.TaskRuntimeIndex
+    to=E_TASK_RUNTIME_INDEX
+  }
+
+  class "CORR_BATCH_UNIT_PAYLOAD" as CORR_BATCH_UNIT_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.BatchExecutionUnit
+    to=E_BATCH_EXECUTION_UNIT
+  }
+
+  class "CORR_BATCH_UNIT_INDEX_PAYLOAD" as CORR_BATCH_UNIT_INDEX_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.BatchExecutionUnitIndex
+    to=E_BATCH_EXECUTION_UNIT_INDEX
+  }
+
+  class "CORR_ATTEMPT_RECORD_PAYLOAD" as CORR_ATTEMPT_RECORD_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.BatchAttemptRecord
+    to=E_BATCH_ATTEMPT_RECORD
+  }
+
+  class "CORR_ATTEMPT_INDEX_PAYLOAD" as CORR_ATTEMPT_INDEX_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.AttemptIndex
+    to=E_BATCH_ATTEMPT_INDEX
+  }
+
+  class "CORR_EVIDENCE_META_PAYLOAD" as CORR_EVIDENCE_META_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.EvidenceMeta
+    to=E_EVIDENCE_META
+  }
+
+  class "CORR_TELEMETRY_PAYLOAD" as CORR_TELEMETRY_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_OBSERVABILITY.EventEnvelope
+    to=E_TELEMETRY_EVENT
+  }
+
+  class "CORR_TIMELINE_INDEX_PAYLOAD" as CORR_TIMELINE_INDEX_PAYLOAD {
+    kind=type_is_payload_of_entity
+    from=TL_RUNTIME_STORE.TimelineIndex
+    to=E_TIMELINE_INDEX
+  }
+
+  class "CORR_OP_APPEND_TELEMETRY" as CORR_OP_APPEND_TELEMETRY {
+    kind=operation_writes_entities
+    from=IF_SYS_RUNTIME_STORE.append_telemetry
+    to=[E_TELEMETRY_EVENT,E_TIMELINE_INDEX]
+  }
+
+  class "CORR_OP_PROGRESS_READS" as CORR_OP_PROGRESS_READS {
+    kind=operation_reads_entities
+    from=IF_SYS_RUNTIME_STORE.get_progress_snapshot
+    to=[E_RUN_META,E_TIMELINE_INDEX]
+  }
+
+  class "CORR_OP_EVIDENCE_WRITES" as CORR_OP_EVIDENCE_WRITES {
+    kind=operation_writes_entities
+    from=IF_SYS_RUNTIME_STORE.put_evidence_blob
+    to=[E_EVIDENCE_PAYLOAD,E_EVIDENCE_META,E_EVIDENCE_INDEX]
+    rule=evidence_index_best_effort
+  }
+}
+
+' Relationships
+E_DRAFT_PLAN_DOCUMENT "1" --> "0..1" E_RUN_EXECUTION_PLAN : R_DRAFT_ACTIVATES_RUN_PLAN|activation|1..0..1
+E_DRAFT_PLAN_DOCUMENT "1" --> "0..1" E_RUN_META : R_DRAFT_ACTIVATES_RUN_META|activation|1..0..1
+E_DRAFT_PLAN_DOCUMENT "1" --> "0..1" E_TASK_RUNTIME_INDEX : R_DRAFT_ACTIVATES_TASK_INDEX|activation|1..0..1
+
+E_RUN_META "1" --> "1" E_RUN_EXECUTION_PLAN : R_RUN_HAS_EXECUTION_PLAN|association|1..1
+E_RUN_META "1" --> "1" E_TASK_RUNTIME_INDEX : R_RUN_HAS_TASK_RUNTIME_INDEX|association|1..1
+E_RUN_META "1" --> "N" E_EVIDENCE_META : R_RUN_HAS_EVIDENCE|association|1..N
+E_RUN_META "1" --> "N" E_TELEMETRY_EVENT : R_RUN_HAS_ACTIVITY|association|1..N
+E_RUN_META "1" ..> E_PROGRESS_SNAPSHOT : R_RUN_DERIVES_PROGRESS|derived_from|1..0..1
+
+E_TASK_RUNTIME_INDEX "1" --> "N" E_BATCH_EXECUTION_UNIT : R_TASK_HAS_BATCH_UNITS|association|1..N
+E_TASK_RUNTIME_INDEX "1" --> "N" E_BATCH_EXECUTION_UNIT_INDEX : R_TASK_HAS_BATCH_UNIT_INDEX|association|1..N
+E_BATCH_EXECUTION_UNIT "1" --> "0..1" E_BATCH_ATTEMPT_INDEX : R_BATCH_HAS_ATTEMPT_INDEX|association|1..0..1
+E_BATCH_EXECUTION_UNIT "1" --> "N" E_BATCH_ATTEMPT_RECORD : R_BATCH_HAS_ATTEMPTS|association|1..N
+
+E_EVIDENCE_META "1" --> "1" E_EVIDENCE_PAYLOAD : R_EVIDENCE_META_DESCRIBES_PAYLOAD|pair|1..1
+E_TELEMETRY_EVENT "N" --> "1" E_TIMELINE_INDEX : R_TIMELINE_INDEXES_EVENTS|index_of|N..1
+
+@enduml

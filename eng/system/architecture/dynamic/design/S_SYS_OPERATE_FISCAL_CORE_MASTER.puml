@@ -39,43 +39,43 @@ note over ESIR, TCB
   not full protocol detail.
 end note
 
-group S1 "Establish bootstrap and configuration"
+group S1 "GRP_MASTER_BOOTSTRAP_AND_CONFIGURATION"
   ref over ACT, ESIR, ESDC, PKI, TCS, TCB
     S_SYS_BOOTSTRAP_AND_CONFIGURATION
   end ref
 end
 
-group S2 "Establish readiness and operator recovery"
+group S2 "GRP_MASTER_STATUS_AND_OPERATOR_RECOVERY"
   ref over ACT, ESIR, ESDC, SE
     S_SYS_STATUS_AND_OPERATOR_RECOVERY
   end ref
 end
 
-group S3 "Fiscalize invoice"
+group S3 "GRP_MASTER_FISCALIZE_INVOICE"
   ref over ACT, ESIR, ESDC, VSDC, SE, TCB
     S_SYS_FISCALIZE_INVOICE
   end ref
 end
 
-group S4 "Maintain backend sync and command lifecycle"
+group S4 "GRP_MASTER_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
   ref over ESDC, TCB
     S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
   end ref
 end
 
-group S5 "Maintain audit and proof lifecycle"
+group S5 "GRP_MASTER_AUDIT_AND_PROOF_LIFECYCLE"
   ref over ESDC, SE, TCB
     S_SYS_AUDIT_AND_PROOF_LIFECYCLE
   end ref
 end
 
-group S6 "Perform local audit export"
+group S6 "GRP_MASTER_LOCAL_AUDIT_EXPORT"
   ref over ACT, ESDC, SE, MEDIA
     S_SYS_LOCAL_AUDIT_EXPORT
   end ref
 end
 
-group S7 "Expose public verification"
+group S7 "GRP_MASTER_PUBLIC_VERIFICATION"
   ref over ACT, ESIR, PV
     S_SYS_PUBLIC_VERIFICATION
   end ref
