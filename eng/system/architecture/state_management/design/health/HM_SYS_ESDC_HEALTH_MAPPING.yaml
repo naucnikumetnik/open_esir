@@ -1,0 +1,197 @@
+artifact_kind: health_mapping
+schema_version: "0.1"
+
+card:
+  id: "HM_SYS_ESDC_HEALTH_MAPPING"
+  name: "E-SDC Health Mapping"
+  system_of_interest: "Open Fiscal Core"
+  level: "system"
+  scope: "E-SDC runtime-boundary health projection"
+  purpose: >
+    Project E-SDC startup, liveness, and readiness from serving state,
+    local runtime responsiveness, secure-element usability, official status surfaces,
+    and audit/proof/backlog context.
+
+owners:
+  primary_owner: "C_ESDC"
+  supporting_readers:
+    - "DEP_STATUS_RECOVERY"
+    - "DEP_BOOTSTRAP"
+    - "DEP_ESIR"
+    - "DEP_EXPORT"
+
+principles:
+  - "Health is projected from serving state plus local runtime and dependency facts."
+  - "Semi-offline operation is normal and does not by itself imply liveness failure."
+  - "Backend-sync delay and proof delay are operational reasons, not automatic liveness failures."
+  - "Readiness means E-SDC may admit new local fiscalization work now."
+  - "Blocking recovery conditions override degraded informational context."
+
+inputs:
+  serving_state:
+    source_artifact: "SM_SYS_ESDC_SERVING"
+    states:
+      - "ST_ESDC_STARTING"
+      - "ST_ESDC_ACCEPTING"
+      - "ST_ESDC_DEGRADED_LOCAL_ONLY"
+      - "ST_ESDC_BLOCKED"
+
+  official_runtime_surfaces:
+    - id: "F_ESDC_ATTENTION_OK"
+      source: "Attention"
+      description: "Minimal availability probe succeeds."
+    - id: "F_ESDC_STATUS_SERVICEABLE"
+      source: "GetStatus"
+      description: "Current official status can be read and interpreted."
+    - id: "F_ESDC_PIN_REQUIRED"
+      source: "GetStatus.isPinRequired"
+      description: "PIN is required before normal secure-element use continues."
+    - id: "F_ESDC_AUDIT_REQUIRED"
+      source: "GetStatus.auditRequired"
+      description: "Audit-required condition blocks normal fiscalization."
+    - id: "F_ESDC_PIN_RECOVERY_SUCCEEDED"
+      source: "VerifyPin"
+      description: "PIN recovery completed successfully."
+    - id: "F_ESDC_TIME_CERT_VALID"
+      source: "local checks + recovery rules"
+      description: "Time synchronization and certificate validity are acceptable."
+
+  local_dependency_facts:
+    - id: "F_ESDC_RUNTIME_RESPONSIVE"
+      description: "Local runtime loop/process is responsive."
+    - id: "F_ESDC_FATAL_RUNTIME_FAULT"
+      description: "Fatal runtime fault is present."
+    - id: "F_ESDC_SECURE_ELEMENT_USABLE"
+      description: "Secure Element path/session is usable."
+    - id: "F_ESDC_BACKEND_PATH_USABLE"
+      description: "TaxCore backend path is usable."
+    - id: "F_ESDC_LOCAL_ONLY_OPERATION_POSSIBLE"
+      description: "E-SDC can continue local-only operation even if backend path is lost."
+    - id: "F_ESDC_BOOTSTRAP_MINIMUM_COMPLETE"
+      description: "Minimum bootstrap needed for valid E-SDC runtime posture is complete."
+
+  operational_context_facts:
+    - id: "F_ESDC_BACKEND_SYNC_DEFERRED"
+      description: "Backend sync cycle is deferred."
+    - id: "F_ESDC_PROOF_PENDING"
+      description: "Proof-of-audit completion is pending."
+    - id: "F_ESDC_LOCAL_AUDIT_EXCHANGE_PENDING"
+      description: "Operator-mediated local-audit file exchange is pending."
+    - id: "F_ESDC_COMMAND_BACKLOG_PRESENT"
+      description: "Command backlog exists but is not yet compacted."
+
+  supporting_snapshot:
+    source_entity: "E_READINESS_RECOVERY_SNAPSHOT"
+    usage:
+      - "diagnostic context"
+      - "last known good readiness"
+      - "operator-facing blocking reason carry-forward"
+
+probe_semantics:
+  startup:
+    definition: "Can E-SDC stand up as a valid local fiscal runtime participant yet?"
+  liveness:
+    definition: "Is E-SDC alive and responsive?"
+  readiness:
+    definition: "May E-SDC admit new local fiscalization work now?"
+
+projection_rules:
+  startup:
+    pass_when:
+      - "F_ESDC_BOOTSTRAP_MINIMUM_COMPLETE == true"
+      - "serving_state != ST_ESDC_STARTING"
+    fail_when_any:
+      - "F_ESDC_BOOTSTRAP_MINIMUM_COMPLETE == false"
+      - "serving_state == ST_ESDC_STARTING"
+
+  liveness:
+    pass_when:
+      - "F_ESDC_RUNTIME_RESPONSIVE == true"
+      - "F_ESDC_ATTENTION_OK == true"
+      - "F_ESDC_FATAL_RUNTIME_FAULT == false"
+    fail_when_any:
+      - "F_ESDC_RUNTIME_RESPONSIVE == false"
+      - "F_ESDC_ATTENTION_OK == false"
+      - "F_ESDC_FATAL_RUNTIME_FAULT == true"
+
+  readiness:
+    pass_when:
+      - "serving_state == ST_ESDC_ACCEPTING"
+      - "F_ESDC_STATUS_SERVICEABLE == true"
+      - "F_ESDC_SECURE_ELEMENT_USABLE == true"
+      - "F_ESDC_PIN_REQUIRED == false"
+      - "F_ESDC_AUDIT_REQUIRED == false"
+      - "F_ESDC_TIME_CERT_VALID == true"
+    pass_when_alternative:
+      - "serving_state == ST_ESDC_DEGRADED_LOCAL_ONLY"
+      - "F_ESDC_STATUS_SERVICEABLE == true"
+      - "F_ESDC_SECURE_ELEMENT_USABLE == true"
+      - "F_ESDC_LOCAL_ONLY_OPERATION_POSSIBLE == true"
+      - "F_ESDC_PIN_REQUIRED == false"
+      - "F_ESDC_AUDIT_REQUIRED == false"
+      - "F_ESDC_TIME_CERT_VALID == true"
+    fail_when_any:
+      - "serving_state == ST_ESDC_BLOCKED"
+      - "F_ESDC_ATTENTION_OK == false"
+      - "F_ESDC_STATUS_SERVICEABLE == false"
+      - "F_ESDC_SECURE_ELEMENT_USABLE == false"
+      - "F_ESDC_PIN_REQUIRED == true"
+      - "F_ESDC_AUDIT_REQUIRED == true"
+      - "F_ESDC_TIME_CERT_VALID == false"
+      - "F_ESDC_FATAL_RUNTIME_FAULT == true"
+
+precedence_rules:
+  - id: "P_ESDC_001"
+    rule: "Fatal runtime fault forces liveness=FAIL and readiness=FAIL."
+  - id: "P_ESDC_002"
+    rule: "Attention failure forces liveness=FAIL and readiness=FAIL."
+  - id: "P_ESDC_003"
+    rule: "PIN-required, audit-required, secure-element-unusable, and invalid time/certificate conditions force readiness=FAIL but do not automatically imply liveness=FAIL."
+  - id: "P_ESDC_004"
+    rule: "Backend path loss does not force readiness=FAIL if local-only operation remains admissible."
+  - id: "P_ESDC_005"
+    rule: "Proof pending, backend-sync deferred, and local-audit exchange pending are reason/context facts unless a serving rule explicitly blocks admission."
+
+reason_catalog:
+  blocking_reasons:
+    - "attention_failed"
+    - "status_unserviceable"
+    - "pin_required"
+    - "audit_required"
+    - "secure_element_unusable"
+    - "time_or_certificate_invalid"
+    - "fatal_runtime_fault"
+  degraded_reasons:
+    - "backend_path_lost_local_only_mode"
+    - "backend_sync_deferred"
+    - "proof_pending"
+    - "local_audit_exchange_pending"
+    - "command_backlog_present"
+  recovery_reasons:
+    - "pin_failed"
+    - "operator_action_required"
+    - "environment_refresh_requested"
+
+output_shape:
+  startup_status: "PASS|FAIL"
+  liveness_status: "PASS|FAIL"
+  readiness_status: "PASS|FAIL"
+  reason_set: "set[str]"
+  blocking_facts: "set[str]"
+  degraded_facts: "set[str]"
+  last_known_good_ref: "optional snapshot pointer"
+  source_snapshot_ref: "E_READINESS_RECOVERY_SNAPSHOT"
+
+traceability:
+  source_artifacts:
+    - "SM_SYS_ESDC_SERVING"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+    - "DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT"
+    - "SM_SYS_ESDC_BACKEND_SYNC_AND_COMMAND"
+    - "SM_SYS_ESDC_AUDIT_AND_PROOF"
+    - "SM_SYS_ESDC_LOCAL_AUDIT_EXPORT"
+
+notes:
+  - "Semi-offline operation is a normal readiness posture when local admission remains possible."
+  - "Operational lag in backend sync or proof completion should normally surface as context, not as liveness failure."
+  - "Readiness remains stricter than liveness."

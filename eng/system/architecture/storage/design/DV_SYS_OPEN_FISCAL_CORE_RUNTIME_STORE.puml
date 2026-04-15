@@ -89,12 +89,12 @@ package "Binding Families" {
 
   class "BND_HOSTED_ACCESS_EDGE_LOCAL_FS" as BND_HOSTED_ACCESS_EDGE_LOCAL_FS {
     applies_to=PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
-    coverage=edge_local_audit_proof_command_export_plus_edge_config
+    coverage=edge_cached_config_only_plus_local_audit_proof_command_export
   }
 
   class "BND_HOSTED_ACCESS_CLOUD_MANAGED" as BND_HOSTED_ACCESS_CLOUD_MANAGED {
     applies_to=PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
-    coverage=hosted_config_and_counters_only
+    coverage=authoritative_hosted_config_and_counters
   }
 }
 
@@ -134,6 +134,8 @@ note bottom
   Keep this master intentionally small.
   If a store-level question needs entity shape, access pattern,
   invariants, or exact paths, open the relevant detailed view.
+  Hosted access may project configuration in both cloud and edge stores;
+  authority is defined in the detailed config-and-counters view.
 end note
 
 @enduml

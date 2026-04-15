@@ -69,6 +69,8 @@ package "Entities - audit evidence" {
     gov.exportability=operator_visible
     inv.append_after_fiscalization_only=true
     inv.core_fields_plus_reference_enrichment=true
+    inv.reference_enrichment_optional=true
+    inv.reference_only_fields_not_required_for_core=true
   }
 
   class "E_AUDIT_PACKAGE_RECORD" as E_AUDIT_PACKAGE_RECORD {
@@ -82,11 +84,13 @@ package "Entities - audit evidence" {
     gov.allowed_writers=DEP_ESDC
     gov.allowed_readers=DEP_ESDC+DEP_EXPORT+DEP_STATUS_RECOVERY
     gov.enc_at_rest=required
-    gov.retention_basis=retain_until_backend_verification_and_policy_clearance
-    gov.delete_policy=status4_delete_or_policy_hold
+    gov.retention_basis=retain_until_remote_status4_or_local_proof_of_audit_command
+    gov.delete_policy=remote_status4_delete_or_local_proof_of_audit_clearance
     gov.exportability=operator_exportable_without_private_material
     inv.key_iv_payload_required=true
     inv.uid_scoped=true
+    inv.canonical_payload_follows_published_AuditPackage_DTO_exactly=true
+    inv.local_audit_retention_until_proof_of_audit_command=true
   }
 
   class "E_AUDIT_BACKLOG_INDEX" as E_AUDIT_BACKLOG_INDEX {
@@ -103,6 +107,7 @@ package "Entities - audit evidence" {
     gov.delete_policy=rebuild_or_compact_when_empty
     gov.exportability=restricted_operator_support
     inv.rebuildable_from=E_AUDIT_PACKAGE_RECORD+E_PROOF_CYCLE_RECORD+E_EXPORT_RESULT_RECORD
+    inv.internal_disposition_index_only=true
   }
 }
 
@@ -130,7 +135,7 @@ package "Entities - proof lifecycle" {
     mutability=immutable
     pk=OFC_STORAGE.ProofCycleRef
     payload=AuditRequestPayload
-    payload.format=base64_string
+    payload.format=opaque_bytes
     payload.content_type=application/octet-stream
     meta=OFC_STORAGE.StoredBlobMeta
     gov.allowed_writers=DEP_ESDC
@@ -140,6 +145,7 @@ package "Entities - proof lifecycle" {
     gov.delete_policy=prune_with_parent_proof_cycle
     gov.exportability=restricted_operator_support
     inv.source=StartAuditApdu
+    inv.base64_applies_only_when_wrapped_in_ProofOfAuditRequest=true
   }
 
   class "E_PROOF_OF_AUDIT_REQUEST_RECORD" as E_PROOF_OF_AUDIT_REQUEST_RECORD {
@@ -164,7 +170,7 @@ package "Entities - proof lifecycle" {
     mutability=mutable
     pk=OFC_STORAGE.ProofCycleRef
     payload=ProofOfAudit
-    payload.format=base64_string
+    payload.format=opaque_bytes
     payload.content_type=application/octet-stream
     meta=OFC_STORAGE.ProofArtifactMeta
     gov.allowed_writers=DEP_ESDC
@@ -198,9 +204,10 @@ package "AccessPatterns" {
     read.2=E_AUDIT_BACKLOG_INDEX:by_pk:strong
     write.1=E_AUDIT_PACKAGE_RECORD:delete_or_retain
     write.2=E_AUDIT_BACKLOG_INDEX:upsert
-    rule.status4_delete_local=true
-    rule.status1_retry_only=true
+    rule.remote_backend_status4_delete_local=true
+    rule.remote_backend_status1_retry_only=true
     rule.audit_status_commands_persisted=true
+    rule.local_audit_media_transfer_is_not_deletion_authority=true
   }
 
   class "AP_START_PROOF_CYCLE" as AP_START_PROOF_CYCLE {
@@ -212,6 +219,7 @@ package "AccessPatterns" {
     write.1=E_AUDIT_REQUEST_PAYLOAD_RECORD:insert_or_replace
     write.2=E_PROOF_OF_AUDIT_REQUEST_RECORD:insert_or_replace
     write.3=E_PROOF_CYCLE_RECORD:upsert
+    comment.poa_strategy=not_always_1_to_1_all_invoices_stored_first
   }
 
   class "AP_COMPLETE_PROOF_CYCLE" as AP_COMPLETE_PROOF_CYCLE {
@@ -225,6 +233,7 @@ package "AccessPatterns" {
     write.2=E_PROOF_CYCLE_RECORD:update
     read.3=E_AUDIT_BACKLOG_INDEX:by_pk:strong_optional
     write.3=E_AUDIT_BACKLOG_INDEX:upsert
+    comment.poa_strategy=non_standard_issuance_strategies_possible
   }
 }
 

@@ -1,0 +1,152 @@
+artifact_kind: health_mapping
+schema_version: "0.1"
+
+card:
+  id: "HM_SYS_ESIR_HEALTH_MAPPING"
+  name: "ESIR Health Mapping"
+  system_of_interest: "Open Fiscal Core"
+  level: "system"
+  scope: "ESIR runtime-boundary health projection"
+  purpose: >
+    Project ESIR startup, liveness, and readiness from serving state,
+    configuration facts, path-availability facts, and recovery context.
+
+owners:
+  primary_owner: "C_ESIR"
+  supporting_readers:
+    - "DEP_STATUS_RECOVERY"
+    - "DEP_BOOTSTRAP"
+    - "DEP_ESDC"
+
+principles:
+  - "Health is projected from serving state plus runtime facts."
+  - "Business workflow states do not directly drive health probes."
+  - "Probe outputs stay boolean: PASS or FAIL."
+  - "Degraded conditions are carried as reasons/context, not as a third probe value."
+  - "Readiness means ESIR may admit new fiscalization work now."
+
+inputs:
+  serving_state:
+    source_artifact: "SM_SYS_ESIR_SERVING"
+    states:
+      - "ST_ESIR_STARTING"
+      - "ST_ESIR_ACCEPTING"
+      - "ST_ESIR_DEGRADED_OFFLINE_CAPABLE"
+      - "ST_ESIR_BLOCKED"
+
+  runtime_facts:
+    - id: "F_ESIR_CONFIG_VALID"
+      description: "Configuration and environment binding are valid enough for admission decisions."
+    - id: "F_ESIR_RUNTIME_RESPONSIVE"
+      description: "ESIR runtime loop/process is responsive."
+    - id: "F_ESIR_FATAL_RUNTIME_FAULT"
+      description: "Fatal runtime fault is currently present."
+    - id: "F_ESIR_ONLINE_PATH_USABLE"
+      description: "Online fiscalization path is usable."
+    - id: "F_ESIR_LOCAL_PATH_USABLE"
+      description: "Local E-SDC fiscalization path is usable."
+    - id: "F_ESIR_ANY_PATH_USABLE"
+      description: "At least one fiscalization path is usable."
+    - id: "F_ESIR_STATUS_SERVICEABLE"
+      description: "Current readiness/status view from E-SDC is serviceable."
+    - id: "F_ESIR_BOOTSTRAP_MINIMUM_COMPLETE"
+      description: "Minimum bootstrap needed for stable ESIR runtime posture is complete."
+
+  supporting_snapshot:
+    source_entity: "E_READINESS_RECOVERY_SNAPSHOT"
+    usage:
+      - "diagnostic context"
+      - "last known good readiness"
+      - "operator-facing blocking reason carry-forward"
+
+probe_semantics:
+  startup:
+    definition: "Can ESIR stand up as a valid runtime participant yet?"
+  liveness:
+    definition: "Is ESIR alive and responsive?"
+  readiness:
+    definition: "May ESIR admit new fiscalization work now?"
+
+projection_rules:
+  startup:
+    pass_when:
+      - "F_ESIR_BOOTSTRAP_MINIMUM_COMPLETE == true"
+      - "serving_state != ST_ESIR_STARTING"
+      - "F_ESIR_CONFIG_VALID == true"
+    fail_when_any:
+      - "F_ESIR_BOOTSTRAP_MINIMUM_COMPLETE == false"
+      - "serving_state == ST_ESIR_STARTING"
+      - "F_ESIR_CONFIG_VALID == false"
+
+  liveness:
+    pass_when:
+      - "F_ESIR_RUNTIME_RESPONSIVE == true"
+      - "F_ESIR_FATAL_RUNTIME_FAULT == false"
+    fail_when_any:
+      - "F_ESIR_RUNTIME_RESPONSIVE == false"
+      - "F_ESIR_FATAL_RUNTIME_FAULT == true"
+
+  readiness:
+    pass_when:
+      - "serving_state == ST_ESIR_ACCEPTING"
+      - "F_ESIR_CONFIG_VALID == true"
+      - "F_ESIR_ANY_PATH_USABLE == true"
+      - "F_ESIR_STATUS_SERVICEABLE == true"
+    pass_when_alternative:
+      - "serving_state == ST_ESIR_DEGRADED_OFFLINE_CAPABLE"
+      - "F_ESIR_CONFIG_VALID == true"
+      - "F_ESIR_LOCAL_PATH_USABLE == true"
+    fail_when_any:
+      - "serving_state == ST_ESIR_BLOCKED"
+      - "F_ESIR_CONFIG_VALID == false"
+      - "F_ESIR_ANY_PATH_USABLE == false"
+      - "F_ESIR_FATAL_RUNTIME_FAULT == true"
+      - "F_ESIR_STATUS_SERVICEABLE == false"
+
+precedence_rules:
+  - id: "P_ESIR_001"
+    rule: "Fatal runtime fault forces liveness=FAIL and readiness=FAIL."
+  - id: "P_ESIR_002"
+    rule: "Configuration invalid forces startup=FAIL and readiness=FAIL."
+  - id: "P_ESIR_003"
+    rule: "No usable fiscalization path forces readiness=FAIL even if ESIR remains live."
+  - id: "P_ESIR_004"
+    rule: "Degraded offline-capable serving may still produce readiness=PASS if local path remains usable."
+
+reason_catalog:
+  blocking_reasons:
+    - "configuration_invalid"
+    - "no_usable_fiscalization_path"
+    - "fatal_runtime_fault"
+    - "esdc_status_unserviceable"
+    - "operator_recovery_required"
+  degraded_reasons:
+    - "online_path_lost"
+    - "local_path_only_operation"
+    - "environment_context_refresh_pending"
+  propagated_reasons_from_esdc:
+    - "audit_required"
+    - "pin_required"
+    - "time_or_certificate_invalid"
+    - "esdc_unavailable"
+
+output_shape:
+  startup_status: "PASS|FAIL"
+  liveness_status: "PASS|FAIL"
+  readiness_status: "PASS|FAIL"
+  reason_set: "set[str]"
+  blocking_facts: "set[str]"
+  degraded_facts: "set[str]"
+  last_known_good_ref: "optional snapshot pointer"
+  source_snapshot_ref: "E_READINESS_RECOVERY_SNAPSHOT"
+
+traceability:
+  source_artifacts:
+    - "SM_SYS_ESIR_SERVING"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+    - "DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT"
+
+notes:
+  - "Readiness is intentionally stricter than liveness."
+  - "ESIR degraded serving is not automatically a health failure."
+  - "Reason propagation from E-SDC should not erase ESIR owner semantics."

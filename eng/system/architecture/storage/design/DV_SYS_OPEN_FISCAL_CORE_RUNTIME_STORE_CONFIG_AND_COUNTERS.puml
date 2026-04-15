@@ -70,6 +70,7 @@ package "Entities - configuration and bootstrap" {
     gov.exportability=restricted_operator_support
     inv.required=true
     inv.approved_source_required=true
+    inv.hosted_authority_mode=cloud_primary_edge_cached
   }
 
   class "E_ENVIRONMENT_BINDING_RECORD" as E_ENVIRONMENT_BINDING_RECORD {
@@ -86,6 +87,7 @@ package "Entities - configuration and bootstrap" {
     gov.delete_policy=replace_only
     gov.exportability=restricted_operator_support
     inv.single_active_binding_per_scope=true
+    inv.hosted_authority_mode=cloud_primary_edge_cached
   }
 
   class "E_SHARED_TAXCORE_SNAPSHOT_RECORD" as E_SHARED_TAXCORE_SNAPSHOT_RECORD {
@@ -102,6 +104,8 @@ package "Entities - configuration and bootstrap" {
     gov.delete_policy=replace_or_expire
     gov.exportability=restricted_operator_support
     inv.source_contracts=Environments+Configuration+TaxRates+EncryptionCertificate
+    inv.hosted_edge_snapshot_role=cache_local_restore_input_only
+    inv.not_canonical_source_when_hosted=true
   }
 
   class "E_HOSTED_COORDINATION_RECORD" as E_HOSTED_COORDINATION_RECORD {
@@ -184,7 +188,9 @@ package "AccessPatterns" {
     read.1=E_HOSTED_COORDINATION_RECORD:by_pk:strong_optional
     read.2=E_ENVIRONMENT_BINDING_RECORD:by_pk:strong_optional
     write.1=E_HOSTED_COORDINATION_RECORD:upsert
-    write.2=E_ENVIRONMENT_BINDING_RECORD:update_when_hosted_context_changes
+    write.2=E_ENVIRONMENT_BINDING_RECORD:update_via_approved_rebind_apply_path
+    rule.no_blind_bidirectional_sync=true
+    rule.hosted_coordination_updates_edge_binding_via_approved_rebind_apply_path=true
   }
 
   class "AP_PERSIST_COUNTER_STATE" as AP_PERSIST_COUNTER_STATE {
@@ -195,6 +201,7 @@ package "AccessPatterns" {
     read.1=E_RECEIPT_SEQUENCE_COUNTER_STATE:by_pk:strong_optional
     write.1=E_RECEIPT_SEQUENCE_COUNTER_STATE:upsert
     policy.counter_monotonic=true
+    policy.authority_is_deployment_selected_counter_store=true
   }
 }
 
@@ -250,6 +257,8 @@ package "Bindings" {
     fs.path.shared_taxcore_snapshot={configuration}/shared_taxcore_snapshot.json
 
     atomicity.write_policy=temp_write_then_rename
+    policy.hosted_records=edge_copy_or_cache_projection_only
+    policy.authority=cloud_primary_edge_cached
 
     apply=[E_APPROVED_CONFIGURATION_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_SHARED_TAXCORE_SNAPSHOT_RECORD]
   }
@@ -271,6 +280,8 @@ package "Bindings" {
     cloud.path.counter_state={counter}/receipt_sequence_counter_state.json
 
     atomicity.write_policy=conditional_upsert_or_service_transaction
+    policy.hosted_records=authoritative_hosted_records
+    policy.authority=cloud_primary_edge_cached
 
     apply=[E_APPROVED_CONFIGURATION_RECORD,E_ENVIRONMENT_BINDING_RECORD,E_SHARED_TAXCORE_SNAPSHOT_RECORD,E_HOSTED_COORDINATION_RECORD,E_RECEIPT_SEQUENCE_COUNTER_STATE]
   }

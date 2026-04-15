@@ -34,7 +34,7 @@ package "Stores" {
     durability=durable
     consistency=strong
     gov.allowed_writers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY
-    gov.allowed_readers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY+DEP_REMOTE_COORDINATION
+    gov.allowed_readers=DEP_ESDC+DEP_BOOTSTRAP+DEP_STATUS_RECOVERY
     gov.enc_at_rest=required
     gov.retention_basis=retain_for_backend_alignment_and_operator_recovery
     gov.delete_policy=replace_or_compact_per_retention_policy
@@ -72,6 +72,7 @@ package "Entities - command and recovery" {
     gov.delete_policy=replace_on_refresh_or_expiry
     gov.exportability=not_operator_exported
     inv.cache_until=AuthenticationTokenResponse.expiresAt
+    inv.token_cache_must_not_leave_trust_boundary=true
   }
 
   class "E_BACKEND_COMMAND_RECORD" as E_BACKEND_COMMAND_RECORD {
@@ -121,6 +122,7 @@ package "Entities - command and recovery" {
     gov.delete_policy=replace_only
     gov.exportability=restricted_operator_support
     inv.last_known_good_and_current_state_may_coexist=true
+    inv.internal_recovery_projection_not_protocol_dto=true
   }
 }
 
@@ -155,7 +157,7 @@ package "Entities - export staging" {
     gov.retention_basis=retain_until_media_write_attempt_is_closed
     gov.delete_policy=replace_or_prune_after_export_window
     gov.exportability=operator_visible
-    inv.filename_policy_is_design_assumption=true
+    inv.materialized_filename_follows_official_local_audit_media_conventions=true
   }
 
   class "E_EXPORT_RESULT_RECORD" as E_EXPORT_RESULT_RECORD {
@@ -206,6 +208,7 @@ package "AccessPatterns" {
     read.3=E_AUDIT_BACKLOG_INDEX:by_pk:strong_optional
     read.4=E_PROOF_CYCLE_RECORD:by_pk:strong_optional
     write.1=E_READINESS_RECOVERY_SNAPSHOT:upsert
+    rule.snapshot_is_serving_projection_not_protocol_truth=true
   }
 
   class "AP_STAGE_LOCAL_AUDIT_EXPORT" as AP_STAGE_LOCAL_AUDIT_EXPORT {
@@ -219,6 +222,7 @@ package "AccessPatterns" {
     write.1=E_EXPORT_BATCH_RECORD:insert_or_replace
     write.N1=E_STAGED_MEDIA_ARTIFACT_RECORD:insert_or_replace
     write.2=E_EXPORT_RESULT_RECORD:upsert
+    rule.materialized_filenames_follow_official_local_audit_media_conventions=true
   }
 
   class "AP_RECORD_LOCAL_EXPORT_OUTCOME" as AP_RECORD_LOCAL_EXPORT_OUTCOME {
@@ -230,6 +234,7 @@ package "AccessPatterns" {
     write.1=E_EXPORT_RESULT_RECORD:upsert
     read.2=E_AUDIT_BACKLOG_INDEX:by_pk:strong
     write.2=E_AUDIT_BACKLOG_INDEX:update_best_effort
+    rule.local_export_outcome_does_not_authorize_package_deletion=true
   }
 }
 
