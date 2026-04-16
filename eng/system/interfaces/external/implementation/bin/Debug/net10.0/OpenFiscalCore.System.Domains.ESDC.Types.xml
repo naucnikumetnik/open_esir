@@ -4,6 +4,26 @@
         <name>OpenFiscalCore.System.Domains.ESDC.Types</name>
     </assembly>
     <members>
+        <member name="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.Command">
+            <summary>
+            Published backend command contract returned by TaxCore for E-SDC processing.
+            </summary>
+            <remarks>
+            The <see cref="P:OpenFiscalCore.System.Domains.ESDC.Types.Backend.Command.Payload" /> value is intentionally opaque at this dependency
+            boundary. Internal business logic should parse it into command-specific
+            internal models before making command-type-specific decisions.
+            </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Domains.ESDC.Types.Backend.Command.#ctor(System.String,OpenFiscalCore.System.Domains.ESDC.Types.Enums.CommandsType,System.String,OpenFiscalCore.System.Types.Primitives.Uid)">
+            <summary>
+            Published backend command contract returned by TaxCore for E-SDC processing.
+            </summary>
+            <remarks>
+            The <see cref="P:OpenFiscalCore.System.Domains.ESDC.Types.Backend.Command.Payload" /> value is intentionally opaque at this dependency
+            boundary. Internal business logic should parse it into command-specific
+            internal models before making command-type-specific decisions.
+            </remarks>
+        </member>
         <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.Idle">
             <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_IDLE.</summary>
         </member>

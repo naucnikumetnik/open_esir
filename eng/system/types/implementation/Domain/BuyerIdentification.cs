@@ -9,22 +9,29 @@ public readonly record struct BuyerIdentification : IStringValueObject<BuyerIden
 {
     public BuyerIdentification(string value)
     {
-        var segments = value.Split(':', 2, StringSplitOptions.None);
-
-        if (segments.Length != 2 || string.IsNullOrWhiteSpace(segments[1]))
+        var separatorIndex = value.IndexOf(':');
+        if (separatorIndex <= 0 || separatorIndex == value.Length - 1)
         {
             throw new ArgumentException("Buyer identification must follow the canonical code:value format.", nameof(value));
         }
 
-        _ = new BuyerIdentificationCode(segments[0]);
+        var code = new BuyerIdentificationCode(value[..separatorIndex]);
+        var identifier = value[(separatorIndex + 1)..];
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            throw new ArgumentException("Buyer identification must follow the canonical code:value format.", nameof(value));
+        }
+
         Value = value;
+        Code = code;
+        Identifier = identifier;
     }
 
     public string Value { get; }
 
-    public BuyerIdentificationCode Code => new(Value.Split(':', 2, StringSplitOptions.None)[0]);
+    public BuyerIdentificationCode Code { get; }
 
-    public string Identifier => Value.Split(':', 2, StringSplitOptions.None)[1];
+    public string Identifier { get; }
 
     public static BuyerIdentification Create(string value) => new(value);
 

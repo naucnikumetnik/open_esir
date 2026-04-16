@@ -1,0 +1,164 @@
+artifact_kind: adapter_inventory
+schema_version: "0.1"
+
+card:
+  id: AI_SYS_OPEN_FISCAL_CORE_ADAPTERS
+  name: Open Fiscal Core - SYS adapter inventory
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-adapter-inventory
+  level: system
+  scope: >
+    Runtime-consumed external dependency seams that are already promoted to
+    concrete pre-bootstrap adapter implementations.
+  purpose: >
+    Record the canonical adapter set, their owning runtime, transport class,
+    source scenarios, config surface, and error-translation responsibility
+    without mixing in deployment activation or bootstrap binding.
+
+traceability:
+  related_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_wiring_view_ref: W_SYS_OPEN_FISCAL_CORE
+  related_realization_view_ref: RV_SYS_OPEN_FISCAL_CORE
+  related_dynamic_view_refs:
+    - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    - S_SYS_FISCALIZE_INVOICE
+    - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    - S_SYS_LOCAL_AUDIT_EXPORT
+
+inventory_policy:
+  inclusion_rule: One runtime-consumed canonical dependency interface maps to one concrete adapter class in this pass.
+  exclusion_rule:
+    - No bootstrap activation or DI registration.
+    - No deployment endpoint binding details.
+    - No Public Verification runtime adapter, because OFC is not invoked in S_SYS_PUBLIC_VERIFICATION.
+  shared_error_translation:
+    failure_type: ExternalDependencyFailureException
+    failure_kind_enum: ExternalDependencyFailureKind
+    rule: Raw HTTP, certificate, device, filesystem, and serialization failures must be translated before leaving the adapter boundary.
+
+adapters:
+  - adapter_id: ADP_SYS_TAXCORE_VSDC
+    owner_runtime_ref: R_SYS_ESIR_RUNTIME
+    canonical_interface_ref: IF_DEP_TAXCORE_VSDC
+    realization_ref: R_SYS_TAXCORE_VSDC_ADAPTER
+    structural_candidate_component_ref: CC_ESIR_TAXCORE_VSDC_ADAPTER
+    wiring_participant_ref: WP_SYS_TAXCORE_VSDC_ADAPTER
+    implementation_class: TaxCoreVsdcHttpAdapter
+    config_record: TaxCoreVsdcHttpAdapterConfig
+    transport_class: http
+    source_scenarios:
+      - S_SYS_FISCALIZE_INVOICE
+    config_surface:
+      - BaseUri
+      - CreateInvoicePath
+      - PacHeaderName
+      - PacCode
+      - AcceptLanguage
+    error_translation_responsibility: Translate HTTP status, transport, and payload-shape failures into canonical dependency failures.
+
+  - adapter_id: ADP_SYS_TAXCORE_SHARED
+    owner_runtime_ref: R_SYS_ESDC_RUNTIME
+    canonical_interface_ref: IF_DEP_TAXCORE_SHARED
+    realization_ref: R_SYS_TAXCORE_SHARED_ADAPTER
+    structural_candidate_component_ref: CC_ESDC_TAXCORE_SHARED_ADAPTER
+    wiring_participant_ref: WP_SYS_TAXCORE_SHARED_ADAPTER
+    implementation_class: TaxCoreSharedHttpAdapter
+    config_record: TaxCoreSharedHttpAdapterConfig
+    transport_class: http
+    constructor_collaborators:
+      - IPkiClientContextDependency
+    source_scenarios:
+      - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    config_surface:
+      - BaseUri
+      - EnvironmentsPath
+      - ConfigurationPath
+      - TaxRatesPath
+      - EncryptionCertificatePath
+    error_translation_responsibility: Translate shared-service transport and payload failures while keeping PKI-context discovery outside the HTTP adapter itself.
+
+  - adapter_id: ADP_SYS_TAXCORE_ESDC_BACKEND
+    owner_runtime_ref: R_SYS_ESDC_RUNTIME
+    canonical_interface_ref: IF_DEP_TAXCORE_ESDC_BACKEND
+    realization_ref: R_SYS_TAXCORE_ESDC_BACKEND_ADAPTER
+    structural_candidate_component_ref: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+    wiring_participant_ref: WP_SYS_TAXCORE_ESDC_BACKEND_ADAPTER
+    implementation_class: TaxCoreEsdcBackendHttpAdapter
+    config_record: TaxCoreEsdcBackendHttpAdapterConfig
+    transport_class: http
+    constructor_collaborators:
+      - IPkiClientContextDependency
+    source_scenarios:
+      - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+      - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+      - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    config_surface:
+      - BaseUri
+      - AuthenticationTokenPath
+      - OnlineStatusPath
+      - InitializationCommandsPath
+      - CommandStatusPathTemplate
+      - AuditPackagePath
+      - ProofRequestPath
+      - AuthenticationHeaderName
+    error_translation_responsibility: Translate backend auth, command, audit, and proof transport failures and prevent raw token/HTTP errors from leaking past the canonical boundary.
+
+  - adapter_id: ADP_SYS_SECURE_ELEMENT
+    owner_runtime_ref: R_SYS_ESDC_RUNTIME
+    canonical_interface_ref: IF_DEP_SECURE_ELEMENT
+    realization_ref: R_SYS_SECURE_ELEMENT_ADAPTER
+    structural_candidate_component_ref: CC_ESDC_SECURE_ELEMENT_ADAPTER
+    wiring_participant_ref: WP_SYS_SECURE_ELEMENT_ADAPTER
+    implementation_class: SecureElementApduAdapter
+    config_record: SecureElementApduAdapterConfig
+    transport_class: device/apdu
+    constructor_collaborators:
+      - Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>>
+    source_scenarios:
+      - S_SYS_FISCALIZE_INVOICE
+      - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    config_surface:
+      - SecureElementApplicationIdHex
+      - AutoSelectApplication
+    error_translation_responsibility: Translate transport-delegate, APDU status-word, and payload-layout failures into canonical device or protocol failures.
+
+  - adapter_id: ADP_SYS_PKI_CLIENT_CONTEXT
+    owner_runtime_ref: R_SYS_ESDC_RUNTIME
+    canonical_interface_ref: IF_DEP_PKI_CLIENT_CONTEXT
+    realization_ref: R_SYS_PKI_CLIENT_CONTEXT_ADAPTER
+    structural_candidate_component_ref: CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+    wiring_participant_ref: WP_SYS_PKI_CLIENT_CONTEXT_ADAPTER
+    implementation_class: PkiClientContextAdapter
+    config_record: PkiClientContextAdapterConfig
+    transport_class: host_context
+    source_scenarios:
+      - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+      - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    config_surface:
+      - SubjectName
+      - StoreName
+      - StoreLocation
+      - ValidOnly
+      - UidOverride
+    error_translation_responsibility: Translate certificate-store access, selection, and missing-context failures into canonical configuration, certificate, or not-found failures.
+
+  - adapter_id: ADP_SYS_REMOVABLE_MEDIA_IO
+    owner_runtime_ref: R_SYS_ESDC_RUNTIME
+    canonical_interface_ref: IF_DEP_REMOVABLE_MEDIA_IO
+    realization_ref: R_SYS_MEDIA_EXCHANGE_ADAPTER
+    structural_candidate_component_ref: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+    wiring_participant_ref: WP_SYS_MEDIA_EXCHANGE_ADAPTER
+    implementation_class: RemovableMediaIoAdapter
+    config_record: RemovableMediaIoAdapterConfig
+    transport_class: filesystem
+    source_scenarios:
+      - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+      - S_SYS_LOCAL_AUDIT_EXPORT
+    config_surface:
+      - RootPath
+    error_translation_responsibility: Translate filesystem access, media-layout, and command-file serialization failures while preserving official media filename conventions.
+
+deferred_or_out_of_scope:
+  - canonical_interface_ref: IF_DEP_PUBLIC_VERIFICATION
+    reason: S_SYS_PUBLIC_VERIFICATION models an external-verifier flow rather than an OFC runtime-consumed adapter seam.

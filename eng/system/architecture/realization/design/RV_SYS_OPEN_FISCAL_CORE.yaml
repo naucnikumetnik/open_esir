@@ -43,7 +43,6 @@ traceability:
     - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
     - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
     - "S_SYS_LOCAL_AUDIT_EXPORT"
-    - "S_SYS_PUBLIC_VERIFICATION"
   related_decision_record_refs: []
 
 realization_defaults:
@@ -126,9 +125,9 @@ realizations:
         mechanism: "In-process or local boundary call through system-defined interface"
         notes: "Concrete transport remains deployment-dependent."
       - kind: "http"
-        target_ref: "R_SYS_PUBLIC_VERIFICATION_ADAPTER"
-        mechanism: "External verification access through adapter boundary"
-        notes: "Keep provider details out of ESIR core."
+        target_ref: "R_SYS_TAXCORE_VSDC_ADAPTER"
+        mechanism: "Adapter-mediated online invoice communication"
+        notes: "Keep V-SDC transport details and PAC handling out of ESIR core."
     constraints:
       portability_constraints:
         - "Must remain portable across local-service, embedded, and hosted-access deployment variants."
@@ -193,14 +192,22 @@ realizations:
       entrypoint_ref: ""
     selected_libraries: []
     integration_bindings:
+      - kind: "http"
+        target_ref: "R_SYS_TAXCORE_SHARED_ADAPTER"
+        mechanism: "Adapter-mediated shared bootstrap communication"
+        notes: "Shared bootstrap details remain behind IF_DEP boundary."
+      - kind: "http"
+        target_ref: "R_SYS_TAXCORE_ESDC_BACKEND_ADAPTER"
+        mechanism: "Adapter-mediated backend communication"
+        notes: "TaxCore backend details remain behind IF_DEP boundary."
+      - kind: "other"
+        target_ref: "R_SYS_PKI_CLIENT_CONTEXT_ADAPTER"
+        mechanism: "Adapter-mediated local certificate-context resolution"
+        notes: "PKI source details stay outside E-SDC core logic."
       - kind: "other"
         target_ref: "R_SYS_SECURE_ELEMENT_ADAPTER"
         mechanism: "Adapter-mediated device/session integration"
         notes: "Keep SE protocol and device specifics out of E-SDC core logic."
-      - kind: "http"
-        target_ref: "R_SYS_TAXCORE_BACKEND_ADAPTER"
-        mechanism: "Adapter-mediated backend communication"
-        notes: "TaxCore backend details remain behind IF_DEP boundary."
       - kind: "other"
         target_ref: "R_SYS_MEDIA_EXCHANGE_ADAPTER"
         mechanism: "Adapter-mediated removable-media file exchange"
@@ -224,10 +231,134 @@ realizations:
       review_policy_ref: ""
     notes: "E-SDC remains the system owner of local fiscal runtime behavior."
 
-  - id: "R_SYS_TAXCORE_BACKEND_ADAPTER"
+  - id: "R_SYS_TAXCORE_VSDC_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_TAXCORE_VSDC"
+    subject_display_name: "TaxCore V-SDC Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for the online V-SDC CreateInvoice path used by ESIR when
+      connected fiscalization is selected.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_FISCALIZE_INVOICE"
+        - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESIR"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "http"
+        target_ref: "EP_TAXCORE_VSDC"
+        mechanism: "HTTP/JSON client integration"
+        notes: "Exact transport/profile stays deployment-bound."
+    constraints:
+      portability_constraints:
+        - "Do not leak V-SDC endpoint, PAC, or certificate transport rules into ESIR core."
+      performance_constraints: []
+      security_constraints:
+        - "PAC and client-certificate obligations remain adapter-owned concerns."
+      compliance_constraints:
+        - "Must track official V-SDC invoice submission obligations."
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+  - id: "R_SYS_TAXCORE_SHARED_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_TAXCORE_SHARED"
+    subject_display_name: "TaxCore Shared Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for bootstrap and shared configuration surfaces including
+      environments, configuration, tax rates, and encryption certificate.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+        - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESDC"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "http"
+        target_ref: "EP_TAXCORE_SHARED"
+        mechanism: "HTTP/JSON client integration"
+        notes: "Exact transport/profile stays deployment-bound."
+    constraints:
+      portability_constraints:
+        - "Do not leak shared bootstrap payload quirks into E-SDC core contracts."
+      performance_constraints: []
+      security_constraints:
+        - "Client-auth context discovery remains outside shared bootstrap orchestration."
+      compliance_constraints:
+        - "Must track official shared TaxCore endpoint obligations."
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+  - id: "R_SYS_TAXCORE_ESDC_BACKEND_ADAPTER"
     subject_kind: "external_adapter"
     subject_ref: "IF_DEP_TAXCORE_ESDC_BACKEND"
-    subject_display_name: "TaxCore Backend Adapter"
+    subject_display_name: "TaxCore E-SDC Backend Adapter"
     parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
     inheritance_mode: "extend"
     implementation_status: "planned"
@@ -253,6 +384,7 @@ realizations:
       primary_symbol_name: ""
       primary_symbol_kind: "other"
       generated_from_refs:
+        - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
         - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
         - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
         - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
@@ -277,6 +409,68 @@ realizations:
         - "Authentication and token handling remain adapter-owned concerns."
       compliance_constraints:
         - "Must track official backend protocol obligations."
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+  - id: "R_SYS_PKI_CLIENT_CONTEXT_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_PKI_CLIENT_CONTEXT"
+    subject_display_name: "PKI Client Context Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for local PKI and client-certificate context lookup used by
+      E-SDC backend-bound adapters.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+        - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
+        - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESDC"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "other"
+        target_ref: "EP_PKI_CLIENT_CONTEXT"
+        mechanism: "Local certificate-store or host-context adapter integration"
+        notes: "Concrete PKI source stays deployment-bound."
+    constraints:
+      portability_constraints:
+        - "PKI store and certificate-source specifics must remain outside E-SDC runtime orchestration."
+      performance_constraints: []
+      security_constraints:
+        - "Certificate lookup, filtering, and metadata extraction remain adapter-owned concerns."
+      compliance_constraints: []
       operational_constraints: []
     verification_and_governance:
       test_profile_refs: []
@@ -348,66 +542,9 @@ realizations:
       review_policy_ref: ""
     notes: ""
 
-  - id: "R_SYS_PUBLIC_VERIFICATION_ADAPTER"
-    subject_kind: "external_adapter"
-    subject_ref: "IF_DEP_PUBLIC_VERIFICATION"
-    subject_display_name: "Public Verification Adapter"
-    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
-    inheritance_mode: "extend"
-    implementation_status: "planned"
-    optional: false
-    description: >
-      Adapter seam for public verification retrieval used by ESIR public verification flow.
-    implementation:
-      language: "C#"
-      language_version: "TBD"
-      runtime: ".NET"
-      runtime_version: "TBD"
-      framework: ""
-      framework_version: ""
-      packaging: "library"
-      implementation_style: "plugin"
-    source_mapping:
-      repository_ref: "REPO_OPEN_ESIR"
-      branch_or_baseline_ref: ""
-      package_root: ""
-      module_path: ""
-      namespace_or_package: ""
-      primary_symbol_name: ""
-      primary_symbol_kind: "other"
-      generated_from_refs:
-        - "S_SYS_PUBLIC_VERIFICATION"
-      cm_binding_ref: ""
-    deployment_mapping:
-      execution_environment_ref: ""
-      runtime_boundary_ref: "RB_SYS_ESIR"
-      deployment_refs: []
-      deployable_artifact_ref: ""
-      entrypoint_ref: ""
-    selected_libraries: []
-    integration_bindings:
-      - kind: "http"
-        target_ref: "EP_PUBLIC_VERIFICATION"
-        mechanism: "HTTP/JSON adapter integration"
-        notes: ""
-    constraints:
-      portability_constraints: []
-      performance_constraints: []
-      security_constraints: []
-      compliance_constraints: []
-      operational_constraints: []
-    verification_and_governance:
-      test_profile_refs: []
-      static_analysis_profile_refs: []
-      sbom_ref: ""
-      manifest_ref: ""
-      lockfile_ref: ""
-      review_policy_ref: ""
-    notes: ""
-
   - id: "R_SYS_MEDIA_EXCHANGE_ADAPTER"
     subject_kind: "external_adapter"
-    subject_ref: "IF_DEP_REMOVABLE_MEDIA_FILE_EXCHANGE"
+    subject_ref: "IF_DEP_REMOVABLE_MEDIA_IO"
     subject_display_name: "Removable Media Exchange Adapter"
     parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
     inheritance_mode: "extend"
@@ -491,6 +628,28 @@ realization_constraints:
       - "R_SYS_ESDC_RUNTIME"
 
   - id: "RC_SYS_003"
+    statement: "V-SDC protocol coupling must remain adapter-owned and must not redefine core system interfaces."
+    rationale: "Allows connected-path protocol evolution and deployment rebinding without redesigning ESIR runtime logic."
+    source: "system_architecture"
+    affected_subject_refs:
+      - "IF_DEP_TAXCORE_VSDC"
+      - "C_ESIR"
+    affected_realization_refs:
+      - "R_SYS_TAXCORE_VSDC_ADAPTER"
+      - "R_SYS_ESIR_RUNTIME"
+
+  - id: "RC_SYS_004"
+    statement: "Shared TaxCore bootstrap protocol coupling must remain adapter-owned and must not redefine core system interfaces."
+    rationale: "Allows bootstrap and configuration rebinding without redesigning E-SDC runtime logic."
+    source: "system_architecture"
+    affected_subject_refs:
+      - "IF_DEP_TAXCORE_SHARED"
+      - "C_ESDC"
+    affected_realization_refs:
+      - "R_SYS_TAXCORE_SHARED_ADAPTER"
+      - "R_SYS_ESDC_RUNTIME"
+
+  - id: "RC_SYS_005"
     statement: "Backend protocol coupling must remain adapter-owned and must not redefine core system interfaces."
     rationale: "Allows protocol evolution and deployment rebinding without redesigning core runtime logic."
     source: "system_architecture"
@@ -498,15 +657,26 @@ realization_constraints:
       - "IF_DEP_TAXCORE_ESDC_BACKEND"
       - "C_ESDC"
     affected_realization_refs:
-      - "R_SYS_TAXCORE_BACKEND_ADAPTER"
+      - "R_SYS_TAXCORE_ESDC_BACKEND_ADAPTER"
       - "R_SYS_ESDC_RUNTIME"
 
-  - id: "RC_SYS_004"
+  - id: "RC_SYS_006"
+    statement: "PKI and client-certificate source coupling must remain adapter-owned."
+    rationale: "Contains certificate-store and host-context specifics without leaking them into runtime orchestration."
+    source: "system_architecture"
+    affected_subject_refs:
+      - "IF_DEP_PKI_CLIENT_CONTEXT"
+      - "C_ESDC"
+    affected_realization_refs:
+      - "R_SYS_PKI_CLIENT_CONTEXT_ADAPTER"
+      - "R_SYS_ESDC_RUNTIME"
+
+  - id: "RC_SYS_007"
     statement: "Local audit removable-media rules must remain outside domain orchestration logic."
     rationale: "Keeps operator/file-exchange specifics localized to adapter realization."
     source: "system_architecture"
     affected_subject_refs:
-      - "IF_DEP_REMOVABLE_MEDIA_FILE_EXCHANGE"
+      - "IF_DEP_REMOVABLE_MEDIA_IO"
       - "C_ESDC"
     affected_realization_refs:
       - "R_SYS_MEDIA_EXCHANGE_ADAPTER"
@@ -521,7 +691,7 @@ analysis_notes:
     - "Filesystem and device assumptions may leak upward if adapter seams are not enforced."
   maintainability_notes: >
     This realization should remain intentionally thin until system interfaces, types,
-    wiring, and bootstrap are stabilized. Component and unit realizations should refine,
+    wiring, adapters, and bootstrap are stabilized. Component and unit realizations should refine,
     not replace, these system-level boundaries.
   migration_notes: >
     Once system interfaces and types are consolidated, this view should be updated with

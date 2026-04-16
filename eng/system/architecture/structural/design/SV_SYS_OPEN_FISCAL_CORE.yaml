@@ -100,7 +100,7 @@ interfaces:
   key_operations:
   - InspectRoot() -> MediaRootInspection
   - ReadCommandsFile(uid:string) -> MediaCommandFile
-  - WriteCommandResults(uid:string)
+  - WriteCommandResults(uid:string, results:MediaCommandResults)
   - EnsureAuditFolder(uid:string)
   - WriteAuditPackage(uid:string, ordinal:number, pkg:AuditPackage)
   - WriteAuditRequestPayload(uid:string, arp:AuditRequestPayload)
@@ -282,6 +282,7 @@ components:
       depends_on_component_ids:
       - CC_ESIR_INVOICE_REQUEST_VALIDATION
       - CC_ESIR_FISCALIZATION_ROUTE_SELECTOR
+      - CC_ESIR_TAXCORE_VSDC_ADAPTER
       cdd_ref: ''
       statefulness: run_scoped
       concurrency: unknown
@@ -361,6 +362,38 @@ components:
           correlation_fields:
           - request_id
           - configured_sdc_mode
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_FISCALIZE_INVOICE
+      cm_binding_ref: ''
+    - component_id: CC_ESIR_TAXCORE_VSDC_ADAPTER
+      name: TaxCore V-SDC Adapter
+      kind: adapter
+      responsibility: Realizuje IF_DEP_TAXCORE_VSDC online invoice pozive.
+      boundary: adapter
+      consumes:
+        ports:
+        - port_ref: P_ESIR_USE_TAXCORE_VSDC
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids: []
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - request_id
+          - invoice_number
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
@@ -638,15 +671,81 @@ components:
         - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
         - S_SYS_LOCAL_AUDIT_EXPORT
       cm_binding_ref: ''
-    - component_id: CC_ESDC_TAXCORE_BACKEND_ADAPTER
-      name: TaxCore Backend Adapter
+    - component_id: CC_ESDC_TAXCORE_SHARED_ADAPTER
+      name: TaxCore Shared Adapter
       kind: adapter
-      responsibility: Realizuje IF_DEP_TAXCORE_ESDC_BACKEND i IF_DEP_TAXCORE_SHARED spoljašnje pozive.
+      responsibility: Realizuje IF_DEP_TAXCORE_SHARED bootstrap i konfiguracione pozive.
       boundary: adapter
       consumes:
         ports:
         - port_ref: P_ESDC_USE_TAXCORE_SHARED
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids:
+      - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - environment_name
+          - request_id
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+      name: TaxCore E-SDC Backend Adapter
+      kind: adapter
+      responsibility: Realizuje IF_DEP_TAXCORE_ESDC_BACKEND pozive za token, komande, audit i proof lifecycle.
+      boundary: adapter
+      consumes:
+        ports:
         - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids:
+      - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes: []
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+          - request_id
+          - command_id
+          - uid
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+      cm_binding_ref: ''
+    - component_id: CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+      name: PKI Client Context Adapter
+      kind: adapter
+      responsibility: Realizuje IF_DEP_PKI_CLIENT_CONTEXT pristup client certificate i PKI kontekstu.
+      boundary: adapter
+      consumes:
+        ports:
         - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
         internal_channels: []
       provides:
@@ -664,15 +763,14 @@ components:
         logging:
           level: required
           correlation_fields:
-          - request_id
-          - command_id
+          - uid
+          - certificate_subject
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
         - S_SYS_BOOTSTRAP_AND_CONFIGURATION
         - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
-        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
       cm_binding_ref: ''
     - component_id: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
       name: Removable Media Adapter

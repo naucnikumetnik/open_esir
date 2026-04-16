@@ -155,7 +155,7 @@
                    <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Media.MediaCommandFile" />.
              </remarks>
         </member>
-        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.WriteCommandResults(OpenFiscalCore.System.Types.Primitives.Uid)">
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.WriteCommandResults(OpenFiscalCore.System.Types.Primitives.Uid,OpenFiscalCore.System.Domains.ESDC.Types.Media.MediaCommandResults)">
              <summary>
              Writes command-processing results for the active secure-element UID.
              </summary>
@@ -163,8 +163,8 @@
              Preconditions:
                  - <paramref name="uid" /> identifies the active secure-element
                    context.
-                 - Command-processing outcomes for that UID are available in local
-                   runtime state.
+                 - <paramref name="results" /> contains the canonical command-result
+                   payload to publish for that UID.
             
              Effects:
                  - Writes the published <c>{UID}.results</c> artifact for the current
@@ -183,7 +183,7 @@
                  - Depends on local removable-media write latency.
             
              Data limits:
-                 - Output is bounded by the current command-result set for one UID.
+                 - Output is bounded by the provided command-result set for one UID.
             
              Errors:
                  - Media-write failure prevents successful result-file publication.

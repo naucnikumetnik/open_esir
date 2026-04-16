@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using OpenFiscalCore.System.Types.Serialization;
 
 namespace OpenFiscalCore.System.Types.Primitives;
 
+[DebuggerDisplay("{GetDebuggerDisplay(),nq}")]
 [JsonConverter(typeof(StringValueObjectJsonConverter<PinPlainText>))]
 public readonly record struct PinPlainText : IStringValueObject<PinPlainText>
 {
@@ -16,9 +18,12 @@ public readonly record struct PinPlainText : IStringValueObject<PinPlainText>
         Value = value;
     }
 
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     public string Value { get; }
 
     public static PinPlainText Create(string value) => new(value);
 
-    public override string ToString() => Value;
+    public override string ToString() => "****";
+
+    private string GetDebuggerDisplay() => "****";
 }

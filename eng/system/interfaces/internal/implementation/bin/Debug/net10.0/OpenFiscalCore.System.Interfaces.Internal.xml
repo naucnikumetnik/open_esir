@@ -129,8 +129,9 @@
                  - No caller payload.
             
              Errors:
-                 - Runtime unavailability is surfaced by the caller through readiness
-                   classification rather than a successful probe.
+                 - A successful probe returns normally.
+                 - Runtime unavailability or probe failure must surface as a failing
+                   call so the caller can classify readiness as unavailable.
              </remarks>
         </member>
         <member name="M:OpenFiscalCore.System.Interfaces.Internal.IEsdcServicePort.GetStatus">

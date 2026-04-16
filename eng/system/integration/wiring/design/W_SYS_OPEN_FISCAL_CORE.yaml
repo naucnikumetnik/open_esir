@@ -1,0 +1,192 @@
+artifact_kind: wiring_view
+schema_version: "0.1"
+
+card:
+  id: W_SYS_OPEN_FISCAL_CORE
+  name: Open Fiscal Core — System Wiring
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-wiring
+  level: system
+  scope: >
+    Logical system-level wiring of the current Open Fiscal Core slice. This
+    artifact captures who is logically connected to whom, through which
+    interface, and in which direction, without deployment-specific adapter
+    binding details.
+  purpose: >
+    Make the current SYS-level logical assembly explicit without turning system
+    wiring into bootstrap, deployment binding, or an index of future CMP-level
+    wiring artifacts.
+
+traceability:
+  related_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_realization_view_ref: RV_SYS_OPEN_FISCAL_CORE
+  related_dynamic_view_refs:
+    - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    - S_SYS_FISCALIZE_INVOICE
+    - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    - S_SYS_LOCAL_AUDIT_EXPORT
+  related_decision_record_refs: []
+
+wiring_policy:
+  included:
+    - logical participant connectivity
+    - interface ownership and direction
+    - structural port refs when already allocated
+    - adapter-seam refinement refs when the logical target is modeled in realization
+  excluded:
+    - concrete classes
+    - concrete C# projects
+    - file paths and namespaces
+    - HTTP URLs and endpoint bindings
+    - device-driver details
+    - instantiation rules
+    - deployment-profile selection
+    - bootstrap activation behavior
+
+participants:
+  - id: WP_SYS_ESIR_RUNTIME
+    kind: runtime
+    subject_ref: R_SYS_ESIR_RUNTIME
+    structural_subject_ref: C_ESIR
+    role: logical_runtime
+    description: ESIR business-facing runtime boundary.
+
+  - id: WP_SYS_ESDC_RUNTIME
+    kind: runtime
+    subject_ref: R_SYS_ESDC_RUNTIME
+    structural_subject_ref: C_ESDC
+    role: logical_runtime
+    description: E-SDC local fiscal runtime boundary.
+
+  - id: WP_SYS_TAXCORE_VSDC_ADAPTER
+    kind: adapter_seam
+    subject_ref: R_SYS_TAXCORE_VSDC_ADAPTER
+    structural_subject_ref: IF_DEP_TAXCORE_VSDC
+    role: logical_adapter
+    description: V-SDC adapter seam kept outside ESIR core logic.
+
+  - id: WP_SYS_TAXCORE_SHARED_ADAPTER
+    kind: adapter_seam
+    subject_ref: R_SYS_TAXCORE_SHARED_ADAPTER
+    structural_subject_ref: IF_DEP_TAXCORE_SHARED
+    role: logical_adapter
+    description: Shared TaxCore bootstrap adapter seam kept outside E-SDC core logic.
+
+  - id: WP_SYS_TAXCORE_ESDC_BACKEND_ADAPTER
+    kind: adapter_seam
+    subject_ref: R_SYS_TAXCORE_ESDC_BACKEND_ADAPTER
+    structural_subject_ref: IF_DEP_TAXCORE_ESDC_BACKEND
+    role: logical_adapter
+    description: TaxCore backend adapter seam for auth, commands, audit, and proof.
+
+  - id: WP_SYS_SECURE_ELEMENT_ADAPTER
+    kind: adapter_seam
+    subject_ref: R_SYS_SECURE_ELEMENT_ADAPTER
+    structural_subject_ref: IF_DEP_SECURE_ELEMENT
+    role: logical_adapter
+    description: Secure-element adapter seam kept outside E-SDC core logic.
+
+  - id: WP_SYS_PKI_CLIENT_CONTEXT_ADAPTER
+    kind: adapter_seam
+    subject_ref: R_SYS_PKI_CLIENT_CONTEXT_ADAPTER
+    structural_subject_ref: IF_DEP_PKI_CLIENT_CONTEXT
+    role: logical_adapter
+    description: PKI client-context adapter seam kept outside E-SDC core logic.
+
+  - id: WP_SYS_MEDIA_EXCHANGE_ADAPTER
+    kind: adapter_seam
+    subject_ref: R_SYS_MEDIA_EXCHANGE_ADAPTER
+    structural_subject_ref: IF_DEP_REMOVABLE_MEDIA_IO
+    role: logical_adapter
+    description: Removable-media exchange adapter seam for command and audit files.
+
+wires:
+  - id: WIRE_SYS_ESIR_TO_ESDC_SERVICE
+    from_participant_ref: WP_SYS_ESIR_RUNTIME
+    to_participant_ref: WP_SYS_ESDC_RUNTIME
+    direction: outbound
+    interface_ref: IF_SYS_ESDC_SERVICE
+    consumer_port_ref: P_ESIR_USE_ESDC_SERVICE
+    provider_port_ref: P_ESDC_PROV_ESDC_SERVICE
+    structural_connection_ref: C_ESIR__ESDC__ESDC_SERVICE
+    mechanism: request_response
+    intent: ESIR delegates local-fiscal runtime capabilities to E-SDC through the system service boundary.
+
+  - id: WIRE_SYS_ESIR_TO_TAXCORE_VSDC_ADAPTER
+    from_participant_ref: WP_SYS_ESIR_RUNTIME
+    to_participant_ref: WP_SYS_TAXCORE_VSDC_ADAPTER
+    direction: outbound
+    interface_ref: IF_DEP_TAXCORE_VSDC
+    consumer_port_ref: P_ESIR_USE_TAXCORE_VSDC
+    provider_port_ref: P_VSDC_PROV_TAXCORE_VSDC
+    structural_connection_ref: C_ESIR__VSDC__TAXCORE_VSDC
+    mechanism: request_response
+    intent: ESIR reaches the online fiscalization path only through the dedicated V-SDC adapter seam.
+
+  - id: WIRE_SYS_ESDC_TO_TAXCORE_SHARED_ADAPTER
+    from_participant_ref: WP_SYS_ESDC_RUNTIME
+    to_participant_ref: WP_SYS_TAXCORE_SHARED_ADAPTER
+    direction: outbound
+    interface_ref: IF_DEP_TAXCORE_SHARED
+    consumer_port_ref: P_ESDC_USE_TAXCORE_SHARED
+    provider_port_ref: P_TCS_PROV_TAXCORE_SHARED
+    structural_connection_ref: C_ESDC__TCS__TAXCORE_SHARED
+    mechanism: request_response
+    intent: E-SDC reaches shared bootstrap and configuration surfaces only through the dedicated shared-adapter seam.
+
+  - id: WIRE_SYS_ESDC_TO_TAXCORE_ESDC_BACKEND_ADAPTER
+    from_participant_ref: WP_SYS_ESDC_RUNTIME
+    to_participant_ref: WP_SYS_TAXCORE_ESDC_BACKEND_ADAPTER
+    direction: outbound
+    interface_ref: IF_DEP_TAXCORE_ESDC_BACKEND
+    consumer_port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+    provider_port_ref: P_TCB_PROV_TAXCORE_ESDC_BACKEND
+    structural_connection_ref: C_ESDC__TCB__TAXCORE_ESDC_BACKEND
+    mechanism: request_response
+    intent: E-SDC reaches backend auth, command, audit, and proof flows only through the backend adapter seam.
+
+  - id: WIRE_SYS_ESDC_TO_SECURE_ELEMENT_ADAPTER
+    from_participant_ref: WP_SYS_ESDC_RUNTIME
+    to_participant_ref: WP_SYS_SECURE_ELEMENT_ADAPTER
+    direction: outbound
+    interface_ref: IF_DEP_SECURE_ELEMENT
+    consumer_port_ref: P_ESDC_USE_SECURE_ELEMENT
+    provider_port_ref: P_SE_PROV_SECURE_ELEMENT
+    structural_connection_ref: C_ESDC__SE__SECURE_ELEMENT
+    mechanism: request_response
+    intent: E-SDC uses Secure Element capabilities only through the dedicated adapter seam.
+
+  - id: WIRE_SYS_ESDC_TO_PKI_CLIENT_CONTEXT_ADAPTER
+    from_participant_ref: WP_SYS_ESDC_RUNTIME
+    to_participant_ref: WP_SYS_PKI_CLIENT_CONTEXT_ADAPTER
+    direction: outbound
+    interface_ref: IF_DEP_PKI_CLIENT_CONTEXT
+    consumer_port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
+    provider_port_ref: P_PKI_PROV_CLIENT_CERT_CONTEXT
+    structural_connection_ref: C_ESDC__PKI__CLIENT_CERT_CONTEXT
+    mechanism: request_response
+    intent: E-SDC resolves local certificate context only through the dedicated PKI adapter seam.
+
+  - id: WIRE_SYS_ESDC_TO_MEDIA_EXCHANGE_ADAPTER
+    from_participant_ref: WP_SYS_ESDC_RUNTIME
+    to_participant_ref: WP_SYS_MEDIA_EXCHANGE_ADAPTER
+    direction: outbound
+    interface_ref: IF_DEP_REMOVABLE_MEDIA_IO
+    consumer_port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+    provider_port_ref: P_MEDIA_PROV_REMOVABLE_MEDIA_IO
+    structural_connection_ref: C_ESDC__MEDIA__REMOVABLE_MEDIA_IO
+    mechanism: shared_data
+    intent: E-SDC uses removable-media exchange only through the dedicated adapter seam.
+
+deferred_or_out_of_scope:
+  - interface_ref: IF_DEP_PUBLIC_VERIFICATION
+    reason: Public verification remains an external-verifier flow and is not modeled as an Open Fiscal Core runtime seam in this pre-bootstrap slice.
+
+  - subject_ref: runtime_store
+    reason: Runtime-store seams stay out of this artifact for now because they are still treated as internal implementation consequences rather than a required separate SYS participant.
+
+analysis_notes:
+  - SYS wiring here is intentionally logical and deployment-agnostic.
+  - Public verification remains outside the Open Fiscal Core runtime because S_SYS_PUBLIC_VERIFICATION models it as an external-verifier flow.
+  - CMP wiring artifacts may later refine this view, but this file should remain readable on its own.

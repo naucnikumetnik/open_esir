@@ -1,0 +1,183 @@
+artifact_kind: protector_assessment
+schema_version: "0.2"
+
+card:
+  id: PA_SYS_OPEN_FISCAL_CORE_PROTECTOR_READINESS
+  name: Open Fiscal Core - SYS protector readiness assessment
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-protector-assessment
+  level: system
+  scope: >
+    Assessment of whether current SYS-level system and dependency interfaces
+    need concrete C# protector wrappers before bootstrap work begins.
+  purpose: >
+    Make the current no-protector decision explicit, keep the reasoning traceable
+    to interface Interaction control blocks, and record future promotion
+    candidates sourced from state and storage invariants.
+  note: >
+    Protectors (P_*) are runtime boundary-policy mechanisms with internal state,
+    timing, and possible side-effects. They are distinct from state-machine
+    guards (G_*), which are pure boolean predicates evaluated on transitions.
+
+traceability:
+  related_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_dynamic_view_refs:
+    - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+    - S_SYS_FISCALIZE_INVOICE
+    - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    - S_SYS_LOCAL_AUDIT_EXPORT
+  related_state_view_refs:
+    - SM_SYS_ESDC_SERVING
+    - SM_SYS_ESDC_BACKEND_SYNC_AND_COMMAND
+    - SM_SYS_ESDC_AUDIT_AND_PROOF
+    - SM_SYS_ESDC_LOCAL_AUDIT_EXPORT
+  related_storage_view_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS
+
+assessment_policy:
+  promotion_rule: Protector code may be introduced only after a non-trivial policy is promoted into the canonical interface Interaction control block.
+  current_default:
+    admission_policy: none
+    duplicate_policy: none_or_allow
+    concurrency_policy: unrestricted
+    overload_policy: none
+    timing_budget: none
+    observability_on_trigger: none
+  conclusion: No concrete protector implementation project is justified in this pass.
+
+interface_assessments:
+  - interface_ref: IF_SYS_ESIR_SERVICE
+    operations:
+      - name: Bootstrap
+        protector_required: false
+      - name: CheckReady
+        protector_required: false
+      - name: VerifyPin
+        protector_required: false
+      - name: Fiscalize
+        protector_required: false
+
+  - interface_ref: IF_SYS_ESDC_SERVICE
+    operations:
+      - name: BootstrapOrRefresh
+        protector_required: false
+      - name: CheckReady
+        protector_required: false
+      - name: Attention
+        protector_required: false
+      - name: GetStatus
+        protector_required: false
+      - name: VerifyPin
+        protector_required: false
+      - name: GetEnvironmentParameters
+        protector_required: false
+      - name: CreateInvoice
+        protector_required: false
+
+  - interface_ref: IF_DEP_TAXCORE_VSDC
+    operations:
+      - name: CreateInvoice
+        protector_required: false
+
+  - interface_ref: IF_DEP_TAXCORE_SHARED
+    operations:
+      - name: Environments
+        protector_required: false
+      - name: Configuration
+        protector_required: false
+      - name: TaxRates
+        protector_required: false
+      - name: EncryptionCertificate
+        protector_required: false
+
+  - interface_ref: IF_DEP_TAXCORE_ESDC_BACKEND
+    operations:
+      - name: RequestAuthenticationToken
+        protector_required: false
+      - name: NotifyOnlineStatus
+        protector_required: false
+      - name: GetInitializationCommands
+        protector_required: false
+      - name: NotifyCommandProcessed
+        protector_required: false
+      - name: SubmitAuditPackage
+        protector_required: false
+      - name: SubmitAuditRequestPayload
+        protector_required: false
+
+  - interface_ref: IF_DEP_SECURE_ELEMENT
+    operations:
+      - name: SignInvoiceApdu
+        protector_required: false
+      - name: StartAuditApdu
+        protector_required: false
+      - name: AmountStatusApdu
+        protector_required: false
+      - name: EndAuditApdu
+        protector_required: false
+
+  - interface_ref: IF_DEP_PKI_CLIENT_CONTEXT
+    operations:
+      - name: ReadClientCertificateContext
+        protector_required: false
+
+  - interface_ref: IF_DEP_REMOVABLE_MEDIA_IO
+    operations:
+      - name: InspectRoot
+        protector_required: false
+      - name: ReadCommandsFile
+        protector_required: false
+      - name: WriteCommandResults
+        protector_required: false
+      - name: EnsureAuditFolder
+        protector_required: false
+      - name: WriteAuditPackage
+        protector_required: false
+      - name: WriteAuditRequestPayload
+        protector_required: false
+
+deferred_protector_candidates:
+  - candidate_id: PC_SYS_PROOF_CYCLE_SINGLE_ACTIVE_UID
+    policy_shape: single_active_proof_cycle_per_uid
+    current_status: deferred
+    source_refs:
+      - SM_SYS_ESDC_AUDIT_AND_PROOF
+      - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF:E_PROOF_CYCLE_RECORD
+    evidence:
+      - inv.one_active_cycle_per_uid=true
+    promotion_condition: Promote once the relevant interface operation gains explicit duplicate or concurrency control semantics.
+
+  - candidate_id: PC_SYS_LOCAL_EXPORT_SINGLE_ACTIVE_SCOPE
+    policy_shape: single_active_local_export_batch_per_scope
+    current_status: deferred
+    source_refs:
+      - SM_SYS_ESDC_LOCAL_AUDIT_EXPORT
+      - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT:E_EXPORT_BATCH_RECORD
+    evidence:
+      - inv.scope_is_uid_and_environment_bound=true
+    promotion_condition: Promote once export-trigger admission or duplicate behavior is stated in interface Interaction control.
+
+  - candidate_id: PC_SYS_COUNTER_MONOTONIC_PERSISTENCE
+    policy_shape: monotonic_counter_update
+    current_status: deferred
+    source_refs:
+      - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS:E_RECEIPT_SEQUENCE_COUNTER_STATE
+      - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS:AP_SYNC_COUNTER_STATE_AFTER_FISCALIZATION
+    evidence:
+      - inv.monotonic_non_decreasing=true
+      - policy.counter_monotonic=true
+    promotion_condition: Promote once a runtime-store or fiscalization-facing interface declares explicit monotonic-write control.
+
+  - candidate_id: PC_SYS_BOOTSTRAP_OR_BACKEND_SYNC_SINGLE_INFLIGHT
+    policy_shape: single_inflight_cycle
+    current_status: deferred
+    source_refs:
+      - SM_SYS_ESDC_SERVING
+      - SM_SYS_ESDC_BACKEND_SYNC_AND_COMMAND
+    evidence:
+      - serving and backend-sync lifecycles are currently modeled as owned state machines, not interface-level control policies
+    promotion_condition: Promote once bootstrap or backend-sync operations declare explicit single-flight, timing-budget, or overload semantics.

@@ -4,5 +4,5 @@ namespace OpenFiscalCore.System.Types.Results;
 
 public sealed record ReadinessResult(
     ReadinessStatus Status,
-    IReadOnlyList<string>? Reasons = null,
+    IReadOnlyList<ReadinessReason>? Reasons = null,
     string? Detail = null);

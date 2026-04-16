@@ -18,6 +18,7 @@ using OpenFiscalCore.System.Types.Enums;
 using OpenFiscalCore.System.Types.Lpfr;
 using OpenFiscalCore.System.Types.Primitives;
 using OpenFiscalCore.System.Types.Results;
+using OpenFiscalCore.System.Types.Validation;
 using OpenFiscalCore.System.Types.Verification;
 
 namespace OpenFiscalCore.System.Qualification;
@@ -82,13 +83,19 @@ internal static class QualificationRunner
     private static void RunWrapperValidationChecks()
     {
         AssertEx.Throws<ArgumentException>(() => new PinPlainText("12A4"), "PinPlainText should reject non-digit input.");
+        AssertEx.Equal("****", new PinPlainText("1234").ToString(), "PinPlainText should redact ToString output.");
         AssertEx.Throws<ArgumentException>(() => new Uid("abc"), "Uid should reject invalid length.");
         AssertEx.Throws<ArgumentException>(() => new BuyerIdentification("99:123"), "BuyerIdentification should reject unknown code prefixes.");
+        AssertEx.Equal("10", new BuyerIdentification("10:123456789").Code.Value, "BuyerIdentification should cache the parsed code.");
+        AssertEx.Equal("123456789", new BuyerIdentification("10:123456789").Identifier, "BuyerIdentification should cache the parsed identifier.");
         AssertEx.Throws<ArgumentException>(() => new RequestId(new string('x', 33)), "RequestId should enforce maximum length.");
         AssertEx.Throws<ArgumentException>(() => new VerificationUrl("not-a-url"), "VerificationUrl should require an absolute URI.");
         AssertEx.Throws<ArgumentException>(() => new EncryptionCertificateBase64(ReadOnlyMemory<byte>.Empty), "EncryptionCertificateBase64 should reject empty payloads.");
         AssertEx.Throws<ArgumentException>(() => new TaxCorePublicKey(new byte[32]), "TaxCorePublicKey should enforce canonical payload length.");
         AssertEx.Throws<ArgumentException>(() => new AuditRequestPayload(new byte[32]), "AuditRequestPayload should enforce canonical payload length.");
+        AssertEx.True(new AuditDataStatusCode(1).IsRetryable, "AuditDataStatusCode should expose retryable semantics.");
+        AssertEx.True(new AuditDataStatusCode(4).ShouldDeleteLocal, "AuditDataStatusCode should expose delete-local semantics.");
+        AssertEx.True(new AuditDataStatusCode(78).ShouldHoldLocal, "AuditDataStatusCode should expose hold-local semantics for non-retryable failures.");
     }
 
     private static void RunBoundaryValidationChecks()
@@ -97,8 +104,22 @@ internal static class QualificationRunner
         ExpectValidationFailure(new InvoiceItem(null, string.Empty, 0m, Array.Empty<string>(), -1m, -1m), "InvoiceItem should reject invalid values.");
         ExpectValidationFailure(new ValidationErrorResponse(string.Empty, Array.Empty<ValidationErrorItem>()), "ValidationErrorResponse should require a message and model state.");
         ExpectValidationFailure(new EnvironmentDescriptorList(Array.Empty<EnvironmentDescriptor>()), "EnvironmentDescriptorList should require at least one item.");
+        ExpectValidationFailure(new MediaCommandResults(Array.Empty<MediaCommandResultItem>()), "MediaCommandResults should require at least one item.");
+        ExpectValidationFailure(new InvoiceRequest(
+            DateTimeOffset.Parse("2026-04-15T10:15:00+02:00"),
+            TaxCoreInvoiceType.Normal,
+            TaxCoreTransactionType.Sale,
+            [new PaymentItem(-1m, TaxCorePaymentType.Cash)],
+            "Operator",
+            null,
+            null,
+            "INV-1",
+            null,
+            null,
+            null,
+            [new InvoiceItem(null, "Bread", 1m, ["A"], 100m, 100m)]), "InvoiceRequest should recursively validate nested DTO items.");
 
-        ValidateObject(new InvoiceRequest(
+        var validInvoiceRequest = new InvoiceRequest(
             DateTimeOffset.Parse("2026-04-15T10:15:00+02:00"),
             TaxCoreInvoiceType.Normal,
             TaxCoreTransactionType.Sale,
@@ -110,7 +131,9 @@ internal static class QualificationRunner
             null,
             null,
             new InvoiceOptions(InvoiceOptionFlag.Generate, InvoiceOptionFlag.Omit),
-            [new InvoiceItem(null, "Bread", 1m, ["A"], 100m, 100m)]));
+            [new InvoiceItem(null, "Bread", 1m, ["A"], 100m, 100m)]);
+
+        validInvoiceRequest.EnsureValid();
 
         ValidateObject(new TaxCoreConfigurationResponse(
             "Business",
@@ -138,6 +161,9 @@ internal static class QualificationRunner
         ValidateObject(new MediaCommandFile(
             new Uid("ABCDEFG1"),
             [new Command("00000000-0000-0000-0000-000000000001", CommandsType.SetTaxRates, "{\"revision\":1}", new Uid("ABCDEFG1"))]));
+
+        ValidateObject(new MediaCommandResults(
+            [new MediaCommandResultItem("00000000-0000-0000-0000-000000000001", true)]));
     }
 
     private static void RunJsonRoundTripChecks()
@@ -207,6 +233,39 @@ internal static class QualificationRunner
         var boolBodyJson = JsonSerializer.Serialize(new TaxCoreBooleanFlagBody(true), JsonOptions);
         var boolBody = JsonSerializer.Deserialize<TaxCoreBooleanFlagBody>(boolBodyJson, JsonOptions);
         AssertEx.True(boolBody.Value, "TaxCoreBooleanFlagBody should round-trip as a bare boolean.");
+
+        var auditStatusJson = JsonSerializer.Serialize(new AuditDataStatus(new AuditDataStatusCode(4), commandList.Items), JsonOptions);
+        var auditStatus = JsonSerializer.Deserialize<AuditDataStatus>(auditStatusJson, JsonOptions)
+            ?? throw new InvalidOperationException("AuditDataStatus round-trip failed.");
+        AssertEx.True(auditStatus.ShouldDeleteLocal, "AuditDataStatus should preserve semantic delete-local classification.");
+        AssertEx.Equal("invoice_verified", auditStatus.Status?.KnownTitle ?? string.Empty, "AuditDataStatus should preserve the known status mapping.");
+
+        var readinessResultJson = JsonSerializer.Serialize(
+            new ReadinessResult(
+                ReadinessStatus.Degraded,
+                [ReadinessReason.BackendPathLostLocalOnlyMode, ReadinessReason.EnvironmentContextRefreshPending],
+                "Local-only mode remains available."),
+            JsonOptions);
+        var readinessResult = JsonSerializer.Deserialize<ReadinessResult>(readinessResultJson, JsonOptions)
+            ?? throw new InvalidOperationException("ReadinessResult round-trip failed.");
+        AssertEx.Equal(ReadinessReason.BackendPathLostLocalOnlyMode, readinessResult.Reasons?[0] ?? default, "ReadinessResult should preserve typed readiness reasons.");
+
+        var bootstrapResultJson = JsonSerializer.Serialize(
+            new BootstrapResult(
+                BootstrapStatus.PendingOperatorAction,
+                [BootstrapReason.InitializationCommandsPendingReview],
+                "One initialization command needs operator review."),
+            JsonOptions);
+        var bootstrapResult = JsonSerializer.Deserialize<BootstrapResult>(bootstrapResultJson, JsonOptions)
+            ?? throw new InvalidOperationException("BootstrapResult round-trip failed.");
+        AssertEx.Equal(BootstrapReason.InitializationCommandsPendingReview, bootstrapResult.Reasons?[0] ?? default, "BootstrapResult should preserve typed bootstrap reasons.");
+
+        var mediaResultsJson = JsonSerializer.Serialize(
+            new MediaCommandResults([new MediaCommandResultItem("00000000-0000-0000-0000-000000000001", true)]),
+            JsonOptions);
+        var mediaResults = JsonSerializer.Deserialize<MediaCommandResults>(mediaResultsJson, JsonOptions)
+            ?? throw new InvalidOperationException("MediaCommandResults round-trip failed.");
+        AssertEx.True(mediaResults.Items[0].ProcessingSucceeded, "MediaCommandResults should preserve command processing outcomes.");
     }
 
     private static void RunStateTraceabilityChecks()
@@ -275,7 +334,7 @@ internal static class QualificationRunner
 
     private static void ValidateObject(object target)
     {
-        Validator.ValidateObject(target, new ValidationContext(target), validateAllProperties: true);
+        ContractValidator.ValidateObjectGraph(target);
     }
 
     private static void ExpectValidationFailure(object target, string message)

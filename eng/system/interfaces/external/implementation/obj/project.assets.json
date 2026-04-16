@@ -1,48 +1,11 @@
 {
   "version": 3,
   "targets": {
-    "net10.0": {
-      "OpenFiscalCore.System.Domains.ESDC.Types/1.0.0": {
-        "type": "project",
-        "framework": ".NETCoreApp,Version=v10.0",
-        "dependencies": {
-          "OpenFiscalCore.System.Types": "1.0.0"
-        },
-        "compile": {
-          "bin/placeholder/OpenFiscalCore.System.Domains.ESDC.Types.dll": {}
-        },
-        "runtime": {
-          "bin/placeholder/OpenFiscalCore.System.Domains.ESDC.Types.dll": {}
-        }
-      },
-      "OpenFiscalCore.System.Types/1.0.0": {
-        "type": "project",
-        "framework": ".NETCoreApp,Version=v10.0",
-        "compile": {
-          "bin/placeholder/OpenFiscalCore.System.Types.dll": {}
-        },
-        "runtime": {
-          "bin/placeholder/OpenFiscalCore.System.Types.dll": {}
-        }
-      }
-    }
+    "net10.0": {}
   },
-  "libraries": {
-    "OpenFiscalCore.System.Domains.ESDC.Types/1.0.0": {
-      "type": "project",
-      "path": "../../../domains/ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj",
-      "msbuildProject": "../../../domains/ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj"
-    },
-    "OpenFiscalCore.System.Types/1.0.0": {
-      "type": "project",
-      "path": "../../../types/implementation/OpenFiscalCore.System.Types.csproj",
-      "msbuildProject": "../../../types/implementation/OpenFiscalCore.System.Types.csproj"
-    }
-  },
+  "libraries": {},
   "projectFileDependencyGroups": {
-    "net10.0": [
-      "OpenFiscalCore.System.Domains.ESDC.Types >= 1.0.0"
-    ]
+    "net10.0": []
   },
   "packageFolders": {
     "/home/bratislav/.nuget/packages/": {}
@@ -69,11 +32,7 @@
       "frameworks": {
         "net10.0": {
           "targetAlias": "net10.0",
-          "projectReferences": {
-            "/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/domains/ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj": {
-              "projectPath": "/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/domains/ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj"
-            }
-          }
+          "projectReferences": {}
         }
       },
       "warningProperties": {

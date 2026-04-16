@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using OpenFiscalCore.System.Types.Serialization;
 
 namespace OpenFiscalCore.System.Types.Primitives;
 
+[DebuggerDisplay("{GetDebuggerDisplay(),nq}")]
 [JsonConverter(typeof(StringValueObjectJsonConverter<PfxCertificatePassword>))]
 public readonly record struct PfxCertificatePassword : IStringValueObject<PfxCertificatePassword>
 {
@@ -16,9 +18,12 @@ public readonly record struct PfxCertificatePassword : IStringValueObject<PfxCer
         Value = value;
     }
 
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     public string Value { get; }
 
     public static PfxCertificatePassword Create(string value) => new(value);
 
-    public override string ToString() => Value;
+    public override string ToString() => "********";
+
+    private string GetDebuggerDisplay() => "********";
 }

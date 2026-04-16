@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../../domains/ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj" />
+    <Reference Include="OpenFiscalCore.System.Types">
+      <HintPath>../../../types/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Types.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenFiscalCore.System.Domains.ESDC.Types">
+      <HintPath>../../../domains/ESDC/types/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Domains.ESDC.Types.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

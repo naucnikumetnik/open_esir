@@ -8,16 +8,14 @@
     ".NETCoreApp,Version=v10.0": {
       "OpenFiscalCore.System.Interfaces.External/1.0.0": {
         "dependencies": {
-          "OpenFiscalCore.System.Domains.ESDC.Types": "1.0.0"
+          "OpenFiscalCore.System.Domains.ESDC.Types": "1.0.0.0",
+          "OpenFiscalCore.System.Types": "1.0.0.0"
         },
         "runtime": {
           "OpenFiscalCore.System.Interfaces.External.dll": {}
         }
       },
-      "OpenFiscalCore.System.Domains.ESDC.Types/1.0.0": {
-        "dependencies": {
-          "OpenFiscalCore.System.Types": "1.0.0"
-        },
+      "OpenFiscalCore.System.Domains.ESDC.Types/1.0.0.0": {
         "runtime": {
           "OpenFiscalCore.System.Domains.ESDC.Types.dll": {
             "assemblyVersion": "1.0.0.0",
@@ -25,7 +23,7 @@
           }
         }
       },
-      "OpenFiscalCore.System.Types/1.0.0": {
+      "OpenFiscalCore.System.Types/1.0.0.0": {
         "runtime": {
           "OpenFiscalCore.System.Types.dll": {
             "assemblyVersion": "1.0.0.0",
@@ -41,13 +39,13 @@
       "serviceable": false,
       "sha512": ""
     },
-    "OpenFiscalCore.System.Domains.ESDC.Types/1.0.0": {
-      "type": "project",
+    "OpenFiscalCore.System.Domains.ESDC.Types/1.0.0.0": {
+      "type": "reference",
       "serviceable": false,
       "sha512": ""
     },
-    "OpenFiscalCore.System.Types/1.0.0": {
-      "type": "project",
+    "OpenFiscalCore.System.Types/1.0.0.0": {
+      "type": "reference",
       "serviceable": false,
       "sha512": ""
     }

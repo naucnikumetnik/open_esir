@@ -105,8 +105,8 @@ public interface IRemovableMediaIoDependency
     /// Preconditions:
     ///     - <paramref name="uid" /> identifies the active secure-element
     ///       context.
-    ///     - Command-processing outcomes for that UID are available in local
-    ///       runtime state.
+    ///     - <paramref name="results" /> contains the canonical command-result
+    ///       payload to publish for that UID.
     ///
     /// Effects:
     ///     - Writes the published <c>{UID}.results</c> artifact for the current
@@ -125,12 +125,12 @@ public interface IRemovableMediaIoDependency
     ///     - Depends on local removable-media write latency.
     ///
     /// Data limits:
-    ///     - Output is bounded by the current command-result set for one UID.
+    ///     - Output is bounded by the provided command-result set for one UID.
     ///
     /// Errors:
     ///     - Media-write failure prevents successful result-file publication.
     /// </remarks>
-    void WriteCommandResults(Uid uid);
+    void WriteCommandResults(Uid uid, MediaCommandResults results);
 
     /// <summary>
     /// Ensures the per-UID audit-export folder exists on removable media.

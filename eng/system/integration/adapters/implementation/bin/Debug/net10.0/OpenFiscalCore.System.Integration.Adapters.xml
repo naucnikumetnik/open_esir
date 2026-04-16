@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OpenFiscalCore.System.Integration.Adapters</name>
+    </assembly>
+    <members>
+        <member name="T:OpenFiscalCore.System.Integration.Adapters.ExternalDependencyFailureException">
+            <summary>
+            Wraps transport, device, certificate, and filesystem failures raised while
+            realizing a canonical external dependency interface.
+            </summary>
+        </member>
+        <member name="T:OpenFiscalCore.System.Integration.Adapters.ExternalDependencyFailureKind">
+            <summary>
+            Classifies adapter-level dependency failures after transport or technology
+            details are translated into canonical boundary errors.
+            </summary>
+        </member>
+    </members>
+</doc>
