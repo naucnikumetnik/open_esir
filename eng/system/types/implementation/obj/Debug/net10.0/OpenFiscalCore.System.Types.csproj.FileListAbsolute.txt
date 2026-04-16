@@ -1,0 +1,14 @@
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.GeneratedMSBuildEditorConfig.editorconfig
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.AssemblyInfoInputs.cache
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.AssemblyInfo.cs
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.csproj.CoreCompileInputs.cache
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.sourcelink.json
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.xml
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/bin/Debug/net10.0/OpenFiscalCore.System.Types.deps.json
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/bin/Debug/net10.0/OpenFiscalCore.System.Types.dll
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/bin/Debug/net10.0/OpenFiscalCore.System.Types.pdb
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/bin/Debug/net10.0/OpenFiscalCore.System.Types.xml
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.dll
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/refint/OpenFiscalCore.System.Types.dll
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/OpenFiscalCore.System.Types.pdb
+/home/bratislav/Documents/Repos/products/commercial_products/open_esir/eng/system/types/implementation/obj/Debug/net10.0/ref/OpenFiscalCore.System.Types.dll

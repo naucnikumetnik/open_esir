@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OpenFiscalCore.System.Domains.ESDC.Types</name>
+    </assembly>
+    <members>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.Idle">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_IDLE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.SubmittingAuditPackage">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_SUBMITTING_AUDIT_PACKAGE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.ResolvingAuditStatus">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_RESOLVING_AUDIT_STATUS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.StartingProofCycle">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_STARTING_PROOF_CYCLE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.SubmittingProofRequest">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_SUBMITTING_PROOF_REQUEST.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.WaitingForProofCompletion">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_WAITING_FOR_PROOF_COMPLETION.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.CompletingProofCycle">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_COMPLETING_PROOF_CYCLE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.Succeeded">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_SUCCEEDED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.Deferred">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_DEFERRED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.Failed">
+            <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_FAILED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.Idle">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_IDLE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.EnsuringAuthContext">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_ENSURING_AUTH_CONTEXT.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.AnnouncingStatus">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_ANNOUNCING_STATUS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.PullingInitializationCommands">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_PULLING_INITIALIZATION_COMMANDS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.CapturingCommands">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_CAPTURING_COMMANDS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.ExecutingCommands">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_EXECUTING_COMMANDS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.ReportingCommandOutcomes">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_REPORTING_COMMAND_OUTCOMES.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.Succeeded">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_SUCCEEDED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.Deferred">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_DEFERRED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcBackendSyncState.Failed">
+            <summary>Corresponds to ST_ESDC_BACKEND_SYNC_FAILED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.Idle">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_IDLE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.MediaDetected">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_MEDIA_DETECTED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.ImportingCommands">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_IMPORTING_COMMANDS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.DeterminingExportSet">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_DETERMINING_EXPORT_SET.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.StagingArtifacts">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_STAGING_ARTIFACTS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.WritingMedia">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_WRITING_MEDIA.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.RecordingMediaResults">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_RECORDING_MEDIA_RESULTS.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.Succeeded">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_SUCCEEDED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.Deferred">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_DEFERRED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalAuditExportState.Failed">
+            <summary>Corresponds to ST_ESDC_LOCAL_AUDIT_EXPORT_FAILED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalFiscalizationState.RequestReceived">
+            <summary>Corresponds to ST_ESDC_LOCAL_FISCALIZATION_REQUEST_RECEIVED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalFiscalizationState.PreparingSignInput">
+            <summary>Corresponds to ST_ESDC_LOCAL_FISCALIZATION_PREPARING_SIGN_INPUT.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalFiscalizationState.Signing">
+            <summary>Corresponds to ST_ESDC_LOCAL_FISCALIZATION_SIGNING.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalFiscalizationState.PersistingLocalEvidence">
+            <summary>Corresponds to ST_ESDC_LOCAL_FISCALIZATION_PERSISTING_LOCAL_EVIDENCE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalFiscalizationState.Succeeded">
+            <summary>Corresponds to ST_ESDC_LOCAL_FISCALIZATION_SUCCEEDED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcLocalFiscalizationState.Failed">
+            <summary>Corresponds to ST_ESDC_LOCAL_FISCALIZATION_FAILED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcServingState.Starting">
+            <summary>Corresponds to ST_ESDC_STARTING.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcServingState.Accepting">
+            <summary>Corresponds to ST_ESDC_ACCEPTING.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcServingState.DegradedLocalOnly">
+            <summary>Corresponds to ST_ESDC_DEGRADED_LOCAL_ONLY.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcServingState.Blocked">
+            <summary>Corresponds to ST_ESDC_BLOCKED.</summary>
+        </member>
+    </members>
+</doc>

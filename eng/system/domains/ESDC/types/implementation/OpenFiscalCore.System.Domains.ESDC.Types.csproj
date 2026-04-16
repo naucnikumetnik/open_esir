@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OpenFiscalCore.System.Domains.ESDC.Types</AssemblyName>
+    <RootNamespace>OpenFiscalCore.System.Domains.ESDC.Types</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../types/implementation/OpenFiscalCore.System.Types.csproj" />
+  </ItemGroup>
+</Project>

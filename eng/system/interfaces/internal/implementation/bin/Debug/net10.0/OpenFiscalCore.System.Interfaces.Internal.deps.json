@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "OpenFiscalCore.System.Interfaces.Internal/1.0.0": {
+        "dependencies": {
+          "OpenFiscalCore.System.Types": "1.0.0"
+        },
+        "runtime": {
+          "OpenFiscalCore.System.Interfaces.Internal.dll": {}
+        }
+      },
+      "OpenFiscalCore.System.Types/1.0.0": {
+        "runtime": {
+          "OpenFiscalCore.System.Types.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "OpenFiscalCore.System.Interfaces.Internal/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "OpenFiscalCore.System.Types/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

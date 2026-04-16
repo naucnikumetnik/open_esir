@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OpenFiscalCore.System.Interfaces.External</AssemblyName>
+    <RootNamespace>OpenFiscalCore.System.Interfaces.External</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../domains/ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj" />
+  </ItemGroup>
+</Project>

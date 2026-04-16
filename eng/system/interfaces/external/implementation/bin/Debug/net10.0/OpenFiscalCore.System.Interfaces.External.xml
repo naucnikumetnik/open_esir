@@ -1,0 +1,901 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OpenFiscalCore.System.Interfaces.External</name>
+    </assembly>
+    <members>
+        <member name="T:OpenFiscalCore.System.Interfaces.External.IPkiClientContextDependency">
+             <summary>
+             Provides the PKI or client-certificate context dependency used for backend authentication.
+             </summary>
+             <remarks>
+             Purpose:
+                 Provide the external PKI and certificate-context boundary used by E-SDC
+                 for backend authentication and TLS identity.
+            
+             Interaction model:
+                 - style: query_api
+                 - sync_mode: sync
+            
+             Interface-wide contract:
+                 - Caller reads the current client-certificate context without owning the
+                   underlying PKI store or applet lifecycle.
+                 - Retrieved values are transport and authentication inputs, not
+                   business-domain state.
+            
+             Observability obligations:
+                 - Carry uid when present and operation outcome in boundary logs.
+            
+             Deployment assumptions:
+                 - Concrete PKI store, smart-card applet, or OS certificate source stays
+                   outside this contract.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IPkiClientContextDependency.ReadClientCertificateContext">
+             <summary>
+             Reads the current client-certificate context used for backend authentication.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A PKI or certificate source is configured for the active runtime.
+            
+             Effects:
+                 - Reads the current client-certificate context.
+                 - Does not mutate local fiscal state.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on the configured local PKI access path.
+            
+             Data limits:
+                 - Result is bounded by the published certificate-context shape.
+            
+             Errors:
+                 - Missing or unusable PKI context prevents a successful
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Pki.ClientCertificateContext" />.
+             </remarks>
+        </member>
+        <member name="T:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency">
+             <summary>
+             Provides the removable-media file I/O dependency used for local audit exchange.
+             </summary>
+             <remarks>
+             Purpose:
+                 Provide the file-based removable-media boundary used for local audit
+                 export and media-delivered command exchange.
+            
+             Interaction model:
+                 - style: command_query
+                 - sync_mode: sync
+            
+             Interface-wide contract:
+                 - Caller uses this boundary for local audit media exchange only.
+                 - Official filename conventions remain part of the contract semantics,
+                   while filesystem mounting and device detection stay outside this
+                   contract.
+            
+             Observability obligations:
+                 - Carry uid when present, media_mount_id when present, and operation in
+                   boundary logs.
+            
+             Deployment assumptions:
+                 - Concrete filesystem access, mount policy, and media detection stay
+                   outside this contract.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.InspectRoot">
+             <summary>
+             Inspects the removable-media root for supported local-audit exchange use.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - Removable media is present and available for inspection.
+            
+             Effects:
+                 - Reads media-root state needed for command import and audit export.
+                 - Does not write fiscal artifacts.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on local removable-media access latency.
+            
+             Data limits:
+                 - Result is bounded by the media-root inspection contract.
+            
+             Errors:
+                 - Unsupported media or filesystem access failure prevent a
+                   successful <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Media.MediaRootInspection" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.ReadCommandsFile(OpenFiscalCore.System.Types.Primitives.Uid)">
+             <summary>
+             Reads the media-delivered command file for the active secure-element UID.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - Media root has already been inspected.
+                 - <paramref name="uid" /> identifies the active secure-element
+                   context.
+            
+             Effects:
+                 - Reads the published <c>{UID}.commands</c> artifact for the current
+                   UID.
+                 - Does not itself apply the commands.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on local removable-media access latency.
+            
+             Data limits:
+                 - Result is bounded by the command-file contract for one UID.
+            
+             Errors:
+                 - Missing command file or media-access failure prevent a successful
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Media.MediaCommandFile" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.WriteCommandResults(OpenFiscalCore.System.Types.Primitives.Uid)">
+             <summary>
+             Writes command-processing results for the active secure-element UID.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - <paramref name="uid" /> identifies the active secure-element
+                   context.
+                 - Command-processing outcomes for that UID are available in local
+                   runtime state.
+            
+             Effects:
+                 - Writes the published <c>{UID}.results</c> artifact for the current
+                   UID.
+                 - Does not clear command or audit backlog state by itself.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on local removable-media write latency.
+            
+             Data limits:
+                 - Output is bounded by the current command-result set for one UID.
+            
+             Errors:
+                 - Media-write failure prevents successful result-file publication.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.EnsureAuditFolder(OpenFiscalCore.System.Types.Primitives.Uid)">
+             <summary>
+             Ensures the per-UID audit-export folder exists on removable media.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - <paramref name="uid" /> identifies the active secure-element
+                   context.
+                 - Media root is available for local-audit export.
+            
+             Effects:
+                 - Ensures the published <c>{UID}/</c> folder exists for export
+                   artifacts.
+                 - Does not itself write audit payloads.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on local removable-media write latency.
+            
+             Data limits:
+                 - No additional caller payload beyond the UID.
+            
+             Errors:
+                 - Media-write failure prevents folder preparation.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.WriteAuditPackage(OpenFiscalCore.System.Types.Primitives.Uid,System.Int32,OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditPackage)">
+             <summary>
+             Writes one audit package artifact for the active secure-element UID.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - <paramref name="uid" /> identifies the active secure-element
+                   context.
+                 - <paramref name="ordinal" /> identifies the export position of the
+                   package within the batch.
+                 - <paramref name="pkg" /> is a canonical pending
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditPackage" />.
+            
+             Effects:
+                 - Writes one published
+                   <c>{UID}-{UID}-{Ordinal_Number}.json</c> audit-package artifact.
+                 - Does not authorize local backlog deletion by itself.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on local removable-media write latency.
+            
+             Data limits:
+                 - The payload must conform to the canonical
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditPackage" /> contract.
+            
+             Errors:
+                 - Media-write failure prevents successful audit-package export.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.IRemovableMediaIoDependency.WriteAuditRequestPayload(OpenFiscalCore.System.Types.Primitives.Uid,OpenFiscalCore.System.Domains.ESDC.Types.Primitives.AuditRequestPayload)">
+             <summary>
+             Writes the audit-request-payload artifact for the active secure-element UID.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - <paramref name="uid" /> identifies the active secure-element
+                   context.
+                 - <paramref name="arp" /> is the canonical opaque
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Primitives.AuditRequestPayload" /> for the current local-audit
+                   exchange.
+            
+             Effects:
+                 - Writes the published <c>{UID}.arp</c> artifact for the current
+                   UID.
+                 - Does not close the proof cycle or clear local audit backlog state
+                   by itself.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on local removable-media write latency.
+            
+             Data limits:
+                 - The payload must conform to the canonical
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Primitives.AuditRequestPayload" /> contract.
+            
+             Errors:
+                 - Media-write failure prevents successful ARP export.
+             </remarks>
+        </member>
+        <member name="T:OpenFiscalCore.System.Interfaces.External.ISecureElementDependency">
+             <summary>
+             Provides the secure-element APDU dependency used by local fiscalization and audit flows.
+             </summary>
+             <remarks>
+             Purpose:
+                 Provide the external secure-element boundary used for invoice signing
+                 and the audit or proof APDU cycle.
+            
+             Interaction model:
+                 - style: command_query
+                 - sync_mode: sync
+            
+             Interface-wide contract:
+                 - Caller uses canonical APDU-side request and response types.
+                 - Device-session details, transport framing, and smart-card access are
+                   realized outside this contract.
+            
+             Observability obligations:
+                 - Carry uid when present, apdu_operation, and operation outcome in
+                   boundary logs.
+            
+             Deployment assumptions:
+                 - Concrete APDU transport and reader binding are deployment-configured
+                   and stay outside this contract.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ISecureElementDependency.SignInvoiceApdu(OpenFiscalCore.System.Domains.ESDC.Types.SecureElement.SignInvoiceApduRequest)">
+             <summary>
+             Requests secure-element signing for one invoice payload.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - The secure-element session is usable for local signing.
+                 - The caller provides a canonical
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.SecureElement.SignInvoiceApduRequest" />.
+            
+             Effects:
+                 - Executes the signing APDU flow.
+                 - Returns the secure-element signing response for local result
+                   construction.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on device, reader, and secure-element response latency.
+            
+             Data limits:
+                 - The payload must conform to the canonical
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.SecureElement.SignInvoiceApduRequest" /> contract.
+            
+             Errors:
+                 - APDU status or device-path failure prevent a successful
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.SecureElement.SignInvoiceApduResponse" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ISecureElementDependency.StartAuditApdu">
+             <summary>
+             Starts the secure-element audit cycle and returns the opaque audit request payload.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - The secure-element session is usable for audit operations.
+            
+             Effects:
+                 - Executes the start-audit APDU flow.
+                 - Returns the opaque audit-request payload used for proof-request
+                   composition.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on device, reader, and secure-element response latency.
+            
+             Data limits:
+                 - No caller payload.
+            
+             Errors:
+                 - APDU status or device-path failure prevent a successful
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Primitives.AuditRequestPayload" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ISecureElementDependency.AmountStatusApdu">
+             <summary>
+             Returns the current amount-status payload used during proof preparation.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - The secure-element session is usable for audit operations.
+            
+             Effects:
+                 - Executes the amount-status APDU flow.
+                 - Returns the current amount summary needed for proof-request
+                   composition.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on device, reader, and secure-element response latency.
+            
+             Data limits:
+                 - No caller payload.
+            
+             Errors:
+                 - APDU status or device-path failure prevent a successful
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.SecureElement.AmountStatusResponse" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ISecureElementDependency.EndAuditApdu(OpenFiscalCore.System.Domains.ESDC.Types.Primitives.ProofOfAudit)">
+             <summary>
+             Completes the active audit cycle with the provided proof payload.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - An active proof cycle exists for the current secure-element
+                   context.
+                 - The caller provides the canonical <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Primitives.ProofOfAudit" />
+                   payload.
+            
+             Effects:
+                 - Executes the end-audit APDU flow and closes the local secure-element
+                   proof phase.
+                 - Does not return a business payload.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Depends on device, reader, and secure-element response latency.
+            
+             Data limits:
+                 - The payload must conform to the canonical
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Primitives.ProofOfAudit" /> contract.
+            
+             Errors:
+                 - APDU status or device-path failure prevent successful audit
+                   completion.
+             </remarks>
+        </member>
+        <member name="T:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency">
+             <summary>
+             Provides the TaxCore E-SDC backend dependency for auth, commands, audit, and proof flows.
+             </summary>
+             <remarks>
+             Purpose:
+                 Provide the external backend boundary used for authentication, online
+                 status, command lifecycle, audit submission, and proof-request
+                 submission.
+            
+             Interaction model:
+                 - style: command_query
+                 - sync_mode: sync
+            
+             Interface-wide contract:
+                 - Caller uses this dependency for published E-SDC backend flows only.
+                 - Backend command and audit results stay transport-layer contracts and
+                   do not redefine local runtime ownership.
+            
+             Observability obligations:
+                 - Carry uid, command_id, request_id, and operation in boundary logs.
+            
+             Deployment assumptions:
+                 - Authentication headers, client-certificate use, retries, and endpoint
+                   selection are deployment-configured and stay outside this contract.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency.RequestAuthenticationToken">
+             <summary>
+             Requests a backend authentication token for E-SDC lifecycle operations.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A valid PKI or client-certificate context is available to the
+                   current runtime.
+            
+             Effects:
+                 - Requests a backend authentication token.
+                 - Returns the published token payload used by later backend calls.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - No caller payload.
+            
+             Errors:
+                 - Missing client-auth context or backend-auth rejection prevent a
+                   successful <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuthenticationTokenResponse" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency.NotifyOnlineStatus(OpenFiscalCore.System.Domains.ESDC.Types.Backend.TaxCoreBooleanFlagBody)">
+             <summary>
+             Reports current online status and optionally receives backend commands.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A valid backend authentication context is available.
+                 - The caller provides the canonical boolean-flag request body.
+            
+             Effects:
+                 - Publishes the current online or offline posture.
+                 - Returns any commands emitted by the backend for the current status
+                   report.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Result size is bounded by the returned backend command set.
+            
+             Errors:
+                 - Auth failure or backend rejection prevent a successful command
+                   response.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency.GetInitializationCommands">
+             <summary>
+             Pulls initialization commands published by the backend.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A valid backend authentication context is available.
+            
+             Effects:
+                 - Reads the published initialization command list.
+                 - Does not acknowledge command application by itself.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Result size is bounded by the returned backend command set.
+            
+             Errors:
+                 - Auth failure or backend rejection prevent a successful command
+                   list result.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency.NotifyCommandProcessed(System.String,OpenFiscalCore.System.Domains.ESDC.Types.Backend.TaxCoreBooleanFlagBody)">
+             <summary>
+             Reports whether a previously received backend command was processed successfully.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A valid backend authentication context is available.
+                 - <paramref name="commandId" /> identifies a known backend command.
+            
+             Effects:
+                 - Publishes the local processing outcome for one backend command.
+                 - Does not return a business payload.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Command identity and boolean outcome must fit the published
+                   command-acknowledgement contract.
+            
+             Errors:
+                 - Auth failure, unknown command identity, or backend rejection
+                   prevent a successful acknowledgement.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency.SubmitAuditPackage(OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditPackage)">
+             <summary>
+             Submits one pending audit package to the backend.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A valid backend authentication context is available.
+                 - The caller provides one canonical pending
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditPackage" />.
+            
+             Effects:
+                 - Submits the audit package for backend processing.
+                 - Returns the published audit status, including any returned
+                   commands.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - The payload must conform to the published
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditPackage" /> contract.
+            
+             Errors:
+                 - Auth failure or backend rejection prevent a successful
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.AuditDataStatus" /> result.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreEsdcBackendDependency.SubmitAuditRequestPayload(OpenFiscalCore.System.Domains.ESDC.Types.Backend.ProofOfAuditRequest)">
+             <summary>
+             Submits a proof-of-audit request composed from local proof inputs.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - A valid backend authentication context is available.
+                 - The caller provides the canonical composed
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.ProofOfAuditRequest" /> payload.
+            
+             Effects:
+                 - Starts the backend proof-request phase for the current proof cycle.
+                 - Does not return a business payload.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - The payload must conform to the published
+                   <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Backend.ProofOfAuditRequest" /> contract.
+            
+             Errors:
+                 - Auth failure or backend rejection prevent successful proof-request
+                   submission.
+             </remarks>
+        </member>
+        <member name="T:OpenFiscalCore.System.Interfaces.External.ITaxCoreSharedDependency">
+             <summary>
+             Provides shared TaxCore bootstrap and configuration data.
+             </summary>
+             <remarks>
+             Purpose:
+                 Provide the external shared TaxCore boundary used during bootstrap and
+                 environment refresh.
+            
+             Interaction model:
+                 - style: query_api
+                 - sync_mode: sync
+            
+             Interface-wide contract:
+                 - Caller reads published shared-data surfaces without owning the remote
+                   configuration state.
+                 - Returned values remain versioned DTOs and bootstrap-side reference
+                   data, not stable business-domain primitives.
+            
+             Observability obligations:
+                 - Carry environment_name when present and the requested operation in
+                   boundary logs.
+            
+             Deployment assumptions:
+                 - Endpoint selection, caching, and TLS server-auth policy are
+                   deployment-configured and stay outside this contract.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreSharedDependency.Environments">
+             <summary>
+             Returns the published list of available environments.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - Shared TaxCore bootstrap data is reachable for the current runtime.
+            
+             Effects:
+                 - Reads the published environment descriptor list.
+                 - Does not mutate local fiscal state.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Result size is bounded by the published environment catalog.
+            
+             Errors:
+                 - Shared-service unavailability or invalid remote data prevent a
+                   successful environment list result.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreSharedDependency.Configuration">
+             <summary>
+             Returns the current shared TaxCore configuration payload.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - Shared TaxCore bootstrap data is reachable for the current runtime.
+            
+             Effects:
+                 - Reads the published shared configuration surface.
+                 - Does not mutate local fiscal state.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Result is bounded by the published configuration DTO.
+            
+             Errors:
+                 - Shared-service unavailability or invalid remote data prevent a
+                   successful <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Shared.TaxCoreConfigurationResponse" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreSharedDependency.TaxRates">
+             <summary>
+             Returns the published tax-rate catalog for the active environment set.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - Shared TaxCore bootstrap data is reachable for the current runtime.
+            
+             Effects:
+                 - Reads the published tax-rate surface.
+                 - Does not mutate local fiscal state.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Result is bounded by the published tax-rate catalog.
+            
+             Errors:
+                 - Shared-service unavailability or invalid remote data prevent a
+                   successful <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Shared.TaxRatesResponse" />.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreSharedDependency.EncryptionCertificate">
+             <summary>
+             Returns the published encryption-certificate payload.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - Shared TaxCore bootstrap data is reachable for the current runtime.
+            
+             Effects:
+                 - Reads the published encryption-certificate surface.
+                 - Does not mutate local fiscal state.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: allow
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - Result is bounded by the published certificate payload.
+            
+             Errors:
+                 - Shared-service unavailability or invalid remote data prevent a
+                   successful <see cref="T:OpenFiscalCore.System.Domains.ESDC.Types.Primitives.EncryptionCertificateBase64" />.
+             </remarks>
+        </member>
+        <member name="T:OpenFiscalCore.System.Interfaces.External.ITaxCoreVsdcDependency">
+             <summary>
+             Provides the online V-SDC invoice fiscalization dependency.
+             </summary>
+             <remarks>
+             Purpose:
+                 Provide the external V-SDC boundary used for connected-path invoice
+                 fiscalization.
+            
+             Interaction model:
+                 - style: command_api
+                 - sync_mode: sync
+            
+             Interface-wide contract:
+                 - Caller submits the canonical invoice request and receives the
+                   published fiscal invoice response from the online path.
+                 - This boundary stays transport-agnostic at the contract level even
+                   when deployment binds it to HTTPS and client-certificate transport.
+            
+             Observability obligations:
+                 - Carry request_id and invoice_number when present in boundary logs.
+            
+             Deployment assumptions:
+                 - Concrete endpoint, TLS policy, and PAC handling are deployment-configured
+                   and stay outside this contract.
+             </remarks>
+        </member>
+        <member name="M:OpenFiscalCore.System.Interfaces.External.ITaxCoreVsdcDependency.CreateInvoice(OpenFiscalCore.System.Types.Lpfr.InvoiceRequest)">
+             <summary>
+             Creates one fiscal invoice through the online V-SDC path.
+             </summary>
+             <remarks>
+             Preconditions:
+                 - The caller provides a complete canonical
+                   <see cref="T:OpenFiscalCore.System.Types.Lpfr.InvoiceRequest" />.
+                 - Connected-path fiscalization is currently selected and usable.
+            
+             Effects:
+                 - Submits the invoice request to the online V-SDC service.
+                 - Returns the resulting fiscal invoice output when the remote path
+                   succeeds.
+            
+             Interaction control:
+                 - admission_policy: none
+                 - duplicate_policy: none
+                 - concurrency_policy: unrestricted
+                 - overload_policy: none
+                 - timing_budget: none
+                 - observability_on_trigger: none
+            
+             Timing:
+                 - Includes remote request or response latency.
+            
+             Data limits:
+                 - The request must conform to the published
+                   <see cref="T:OpenFiscalCore.System.Types.Lpfr.InvoiceRequest" /> contract.
+            
+             Errors:
+                 - Remote validation or operational failure prevent a successful
+                   <see cref="T:OpenFiscalCore.System.Types.Lpfr.InvoiceResult" />.
+             </remarks>
+        </member>
+    </members>
+</doc>

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OpenFiscalCore.System.Types</AssemblyName>
+    <RootNamespace>OpenFiscalCore.System.Types</RootNamespace>
+  </PropertyGroup>
+</Project>

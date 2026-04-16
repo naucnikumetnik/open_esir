@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OpenFiscalCore.System.Qualification</AssemblyName>
+    <RootNamespace>OpenFiscalCore.System.Qualification</RootNamespace>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="OpenFiscalCore.System.Types">
+      <HintPath>../../types/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Types.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenFiscalCore.System.Domains.ESIR.Types">
+      <HintPath>../../domains/ESIR/types/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Domains.ESIR.Types.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenFiscalCore.System.Domains.ESDC.Types">
+      <HintPath>../../domains/ESDC/types/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Domains.ESDC.Types.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

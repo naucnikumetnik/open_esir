@@ -1,0 +1,533 @@
+artifact_kind: realization_view
+schema_version: "0.1"
+
+card:
+  id: "RV_SYS_OPEN_FISCAL_CORE"
+  name: "Open Fiscal Core — System Realization View"
+  system_of_interest: "Open Fiscal Core"
+  domain: "system"
+  viewpoint_ref: "VP-realization"
+  level: "system"
+  scope: >
+    System-level realization choices for Open Fiscal Core runtime boundaries,
+    external adapter seams, and deployment-aligned implementation direction.
+  purpose: >
+    Bridge system architecture views to implementation direction without yet
+    committing to component-internal or unit-level source structure.
+
+traceability:
+  related_stakeholder_refs:
+    - "STK_OPERATOR"
+    - "STK_INTEGRATOR"
+    - "STK_VENDOR_PLATFORM_OWNER"
+    - "STK_MAINTAINER"
+  related_concern_refs:
+    - "CCN_PORTABILITY"
+    - "CCN_DEPLOYABILITY"
+    - "CCN_MAINTAINABILITY"
+    - "CCN_EXTERNAL_INTEGRATION"
+    - "CCN_RUNTIME_SEPARATION"
+  related_constraint_refs:
+    - "CON_DEPLOYMENT_VARIANTS"
+    - "CON_SECURE_ELEMENT_REQUIRED"
+    - "CON_TAXCORE_PROTOCOL_COMPLIANCE"
+    - "CON_LOCAL_AUDIT_FILE_EXCHANGE"
+  related_requirement_refs: []
+  related_structural_view_ref: "SV_SYS_OPEN_FISCAL_CORE"
+  related_deployment_view_ref: "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+  related_dynamic_view_refs:
+    - "S_SYS_OPERATE_FISCAL_CORE_MASTER"
+    - "S_SYS_BOOTSTRAP_AND_CONFIGURATION"
+    - "S_SYS_FISCALIZE_INVOICE"
+    - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+    - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
+    - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
+    - "S_SYS_LOCAL_AUDIT_EXPORT"
+    - "S_SYS_PUBLIC_VERIFICATION"
+  related_decision_record_refs: []
+
+realization_defaults:
+  - id: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    name: "Primary managed runtime default"
+    scope_kind: "system"
+    scope_ref: "SV_SYS_OPEN_FISCAL_CORE"
+    description: >
+      Default realization direction for system-owned runtime logic is managed
+      C#/.NET code, unless a narrower scope explicitly overrides this choice.
+    implementation_defaults:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "package"
+      repository_ref: "REPO_OPEN_ESIR"
+      package_root: ""
+      build_profile_ref: ""
+      execution_environment_ref: ""
+      runtime_boundary_ref: ""
+    selected_libraries: []
+    exclusions:
+      libraries_not_allowed: []
+      language_features_not_allowed: []
+    inheritance_policy:
+      allow_child_override: true
+      override_rules:
+        - "Narrower scopes may override only when external protocol, device, or platform constraints require it."
+        - "Override must preserve logical system interfaces and deployment portability goals."
+    cm_binding_ref: ""
+
+realizations:
+  - id: "R_SYS_ESIR_RUNTIME"
+    subject_kind: "component"
+    subject_ref: "C_ESIR"
+    subject_display_name: "ESIR Runtime"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Realization of ESIR as a managed runtime boundary responsible for request intake,
+      validation, route selection, and result return across supported deployment variants.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "service"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "service"
+      generated_from_refs:
+        - "SV_SYS_OPEN_FISCAL_CORE"
+        - "S_SYS_FISCALIZE_INVOICE"
+        - "SM_SYS_ESIR_SERVING"
+        - "HM_SYS_ESIR_HEALTH_MAPPING"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESIR"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "other"
+        target_ref: "R_SYS_ESDC_RUNTIME"
+        mechanism: "In-process or local boundary call through system-defined interface"
+        notes: "Concrete transport remains deployment-dependent."
+      - kind: "http"
+        target_ref: "R_SYS_PUBLIC_VERIFICATION_ADAPTER"
+        mechanism: "External verification access through adapter boundary"
+        notes: "Keep provider details out of ESIR core."
+    constraints:
+      portability_constraints:
+        - "Must remain portable across local-service, embedded, and hosted-access deployment variants."
+      performance_constraints: []
+      security_constraints:
+        - "Must not embed external provider protocol details directly into core orchestration logic."
+      compliance_constraints:
+        - "Must preserve logical contract alignment with fiscalization workflow."
+      operational_constraints:
+        - "Serving and health projection stay separate from business workflow state."
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: "Do not overfit this realization to one deployment transport."
+
+  - id: "R_SYS_ESDC_RUNTIME"
+    subject_kind: "component"
+    subject_ref: "C_ESDC"
+    subject_display_name: "E-SDC Runtime"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Realization of E-SDC as a managed runtime boundary responsible for local fiscalization,
+      status/recovery, backend sync and command handling, audit/proof lifecycle, and local export.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "service"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "service"
+      generated_from_refs:
+        - "SV_SYS_OPEN_FISCAL_CORE"
+        - "S_SYS_STATUS_AND_OPERATOR_RECOVERY"
+        - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
+        - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
+        - "S_SYS_LOCAL_AUDIT_EXPORT"
+        - "SM_SYS_ESDC_SERVING"
+        - "HM_SYS_ESDC_HEALTH_MAPPING"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESDC"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "other"
+        target_ref: "R_SYS_SECURE_ELEMENT_ADAPTER"
+        mechanism: "Adapter-mediated device/session integration"
+        notes: "Keep SE protocol and device specifics out of E-SDC core logic."
+      - kind: "http"
+        target_ref: "R_SYS_TAXCORE_BACKEND_ADAPTER"
+        mechanism: "Adapter-mediated backend communication"
+        notes: "TaxCore backend details remain behind IF_DEP boundary."
+      - kind: "other"
+        target_ref: "R_SYS_MEDIA_EXCHANGE_ADAPTER"
+        mechanism: "Adapter-mediated removable-media file exchange"
+        notes: "Local audit media rules remain outside E-SDC core orchestration."
+    constraints:
+      portability_constraints:
+        - "Must remain deployable in local-service, embedded, and hosted-access-supported shapes."
+      performance_constraints: []
+      security_constraints:
+        - "Secure Element access must remain behind a dedicated adapter seam."
+      compliance_constraints:
+        - "Must preserve externally defined E-SDC behavioral and integration obligations."
+      operational_constraints:
+        - "Semi-offline operation must remain possible without coupling runtime liveness to backend availability."
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: "E-SDC remains the system owner of local fiscal runtime behavior."
+
+  - id: "R_SYS_TAXCORE_BACKEND_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_TAXCORE_ESDC_BACKEND"
+    subject_display_name: "TaxCore Backend Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for official backend-facing E-SDC operations including authentication,
+      status publication, command intake, audit package submission, and proof request submission.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE"
+        - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
+        - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESDC"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "http"
+        target_ref: "EP_TAXCORE_ESDC_BACKEND"
+        mechanism: "HTTP/JSON client integration"
+        notes: "Exact transport/profile stays deployment-bound."
+    constraints:
+      portability_constraints:
+        - "Do not leak backend DTO peculiarities into core runtime contracts."
+      performance_constraints: []
+      security_constraints:
+        - "Authentication and token handling remain adapter-owned concerns."
+      compliance_constraints:
+        - "Must track official backend protocol obligations."
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+  - id: "R_SYS_SECURE_ELEMENT_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_SECURE_ELEMENT"
+    subject_display_name: "Secure Element Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for Secure Element operations needed by E-SDC local fiscalization
+      and proof-related flows.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_FISCALIZE_INVOICE"
+        - "S_SYS_AUDIT_AND_PROOF_LIFECYCLE"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESDC"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "other"
+        target_ref: "EP_SECURE_ELEMENT"
+        mechanism: "Device/session adapter binding"
+        notes: "Concrete device protocol must remain isolated."
+    constraints:
+      portability_constraints:
+        - "Keep device/protocol specifics out of E-SDC core runtime."
+      performance_constraints: []
+      security_constraints:
+        - "Secure invocation path must remain tightly controlled and auditable."
+      compliance_constraints: []
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+  - id: "R_SYS_PUBLIC_VERIFICATION_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_PUBLIC_VERIFICATION"
+    subject_display_name: "Public Verification Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for public verification retrieval used by ESIR public verification flow.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_PUBLIC_VERIFICATION"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESIR"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "http"
+        target_ref: "EP_PUBLIC_VERIFICATION"
+        mechanism: "HTTP/JSON adapter integration"
+        notes: ""
+    constraints:
+      portability_constraints: []
+      performance_constraints: []
+      security_constraints: []
+      compliance_constraints: []
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+  - id: "R_SYS_MEDIA_EXCHANGE_ADAPTER"
+    subject_kind: "external_adapter"
+    subject_ref: "IF_DEP_REMOVABLE_MEDIA_FILE_EXCHANGE"
+    subject_display_name: "Removable Media Exchange Adapter"
+    parent_realization_ref: "RD_SYS_CSHARP_RUNTIME_DEFAULT"
+    inheritance_mode: "extend"
+    implementation_status: "planned"
+    optional: false
+    description: >
+      Adapter seam for removable-media file discovery, command import, audit export,
+      ARP export, and command-result file emission.
+    implementation:
+      language: "C#"
+      language_version: "TBD"
+      runtime: ".NET"
+      runtime_version: "TBD"
+      framework: ""
+      framework_version: ""
+      packaging: "library"
+      implementation_style: "plugin"
+    source_mapping:
+      repository_ref: "REPO_OPEN_ESIR"
+      branch_or_baseline_ref: ""
+      package_root: ""
+      module_path: ""
+      namespace_or_package: ""
+      primary_symbol_name: ""
+      primary_symbol_kind: "other"
+      generated_from_refs:
+        - "S_SYS_LOCAL_AUDIT_EXPORT"
+        - "DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER"
+      cm_binding_ref: ""
+    deployment_mapping:
+      execution_environment_ref: ""
+      runtime_boundary_ref: "RB_SYS_ESDC"
+      deployment_refs: []
+      deployable_artifact_ref: ""
+      entrypoint_ref: ""
+    selected_libraries: []
+    integration_bindings:
+      - kind: "other"
+        target_ref: "EP_REMOVABLE_MEDIA_FS"
+        mechanism: "Filesystem/removable-media adapter integration"
+        notes: "File naming and folder conventions stay adapter-owned."
+    constraints:
+      portability_constraints:
+        - "Keep media-layout and filesystem specifics outside E-SDC core logic."
+      performance_constraints: []
+      security_constraints:
+        - "Do not allow direct arbitrary file-system semantics to leak into domain logic."
+      compliance_constraints:
+        - "Must preserve official removable-media naming and exchange rules."
+      operational_constraints: []
+    verification_and_governance:
+      test_profile_refs: []
+      static_analysis_profile_refs: []
+      sbom_ref: ""
+      manifest_ref: ""
+      lockfile_ref: ""
+      review_policy_ref: ""
+    notes: ""
+
+realization_constraints:
+  - id: "RC_SYS_001"
+    statement: "Core orchestration logic must remain separated from provider-specific transport and device protocols."
+    rationale: "Preserves portability and keeps deployment-specific variation out of core runtime behavior."
+    source: "architecture_policy"
+    affected_subject_refs:
+      - "C_ESIR"
+      - "C_ESDC"
+    affected_realization_refs:
+      - "R_SYS_ESIR_RUNTIME"
+      - "R_SYS_ESDC_RUNTIME"
+
+  - id: "RC_SYS_002"
+    statement: "Secure Element access must occur only through a dedicated adapter seam."
+    rationale: "Contains device/protocol coupling and supports auditable security boundaries."
+    source: "system_architecture"
+    affected_subject_refs:
+      - "IF_DEP_SECURE_ELEMENT"
+      - "C_ESDC"
+    affected_realization_refs:
+      - "R_SYS_SECURE_ELEMENT_ADAPTER"
+      - "R_SYS_ESDC_RUNTIME"
+
+  - id: "RC_SYS_003"
+    statement: "Backend protocol coupling must remain adapter-owned and must not redefine core system interfaces."
+    rationale: "Allows protocol evolution and deployment rebinding without redesigning core runtime logic."
+    source: "system_architecture"
+    affected_subject_refs:
+      - "IF_DEP_TAXCORE_ESDC_BACKEND"
+      - "C_ESDC"
+    affected_realization_refs:
+      - "R_SYS_TAXCORE_BACKEND_ADAPTER"
+      - "R_SYS_ESDC_RUNTIME"
+
+  - id: "RC_SYS_004"
+    statement: "Local audit removable-media rules must remain outside domain orchestration logic."
+    rationale: "Keeps operator/file-exchange specifics localized to adapter realization."
+    source: "system_architecture"
+    affected_subject_refs:
+      - "IF_DEP_REMOVABLE_MEDIA_FILE_EXCHANGE"
+      - "C_ESDC"
+    affected_realization_refs:
+      - "R_SYS_MEDIA_EXCHANGE_ADAPTER"
+      - "R_SYS_ESDC_RUNTIME"
+
+analysis_notes:
+  technology_risks:
+    - "Exact .NET profile, hosting model, and package boundaries are not fixed yet."
+    - "Adapter surface shape depends on final system interface consolidation."
+  portability_risks:
+    - "Overfitting runtime core to one deployment variant would weaken embedded/hosted portability."
+    - "Filesystem and device assumptions may leak upward if adapter seams are not enforced."
+  maintainability_notes: >
+    This realization should remain intentionally thin until system interfaces, types,
+    wiring, and bootstrap are stabilized. Component and unit realizations should refine,
+    not replace, these system-level boundaries.
+  migration_notes: >
+    Once system interfaces and types are consolidated, this view should be updated with
+    concrete repository roots, namespaces, and deployable artifact references.
+  open_questions:
+    - "Should ESIR and E-SDC ship as separate assemblies, separate processes, or deployment-selectable shapes?"
+    - "Does hosted-access require an explicit relay/gateway realization item at system level?"
+    - "Should runtime-store access be represented as a separate realization item already at SYS level, or deferred to CMP level?"
+    - "Should removable-media exchange remain one adapter seam or split into discovery/read/write sub-realizations?"
