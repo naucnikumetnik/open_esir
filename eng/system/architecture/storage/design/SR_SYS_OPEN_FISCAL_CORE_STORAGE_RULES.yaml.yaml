@@ -1,0 +1,330 @@
+artifact_kind: storage_rules_view
+schema_version: "0.1"
+
+card:
+  id: SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+  name: Open Fiscal Core — Storage Rules
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-rules
+  level: system
+  scope: >
+    System-level storage rules for runtime-store ownership, retention,
+    deletion/disposition, authority constraints, and export semantics.
+  purpose: >
+    Keep cross-store storage invariants and retention/disposition rules explicit
+    without descending into repository or database implementation.
+
+traceability:
+  related_storage_view_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT
+  related_binding_view_ref: SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+  related_basis_ref: DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BASIS
+  related_dynamic_view_refs:
+    - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+    - S_SYS_FISCALIZE_INVOICE
+    - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+    - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+    - S_SYS_LOCAL_AUDIT_EXPORT
+    - S_SYS_PUBLIC_VERIFICATION
+
+rule_families:
+  - id: RF_OWNERSHIP_BOUNDARY
+    name: Ownership boundary rules
+  - id: RF_AUTHORITY_AND_CACHE
+    name: Authority and cache rules
+  - id: RF_RETENTION_AND_DISPOSITION
+    name: Retention and disposition rules
+  - id: RF_EXPORT_AND_MEDIA
+    name: Export and removable-media rules
+  - id: RF_PROOF_AND_AUDIT
+    name: Proof and audit rules
+  - id: RF_RECOVERY_AND_COMMAND
+    name: Recovery and command rules
+
+rules:
+  - id: SR_SYS_001
+    family_ref: RF_OWNERSHIP_BOUNDARY
+    statement: >
+      Runtime-store artifacts cover OFC-owned persistent state only.
+      PKI private keys, smart-card applet ownership state, OS secure-store
+      material, and managed vault state remain outside internal ST_* ownership.
+    applies_to:
+      - ST_SYSTEM_CONFIGURATION_STATE
+      - ST_COUNTER_STATE
+      - ST_AUDIT_EVIDENCE_STATE
+      - ST_PROOF_LIFECYCLE_STATE
+      - ST_COMMAND_RECOVERY_STATE
+      - ST_EXPORT_STAGING_STATE
+
+  - id: SR_SYS_002
+    family_ref: RF_AUTHORITY_AND_CACHE
+    statement: >
+      Hosted access keeps configuration and environment-binding truth in cloud
+      managed storage, while edge copies remain cached projections unless explicit
+      edge-cached fallback mode is active.
+    applies_to:
+      - ST_SYSTEM_CONFIGURATION_STATE
+
+  - id: SR_SYS_003
+    family_ref: RF_AUTHORITY_AND_CACHE
+    statement: >
+      Hosted access keeps counter continuity in cloud-managed storage and does not
+      demote counter persistence to request-scoped or volatile edge memory.
+    applies_to:
+      - ST_COUNTER_STATE
+
+  - id: SR_SYS_004
+    family_ref: RF_AUTHORITY_AND_CACHE
+    statement: >
+      Hosted access keeps audit evidence, proof state, command/recovery state,
+      and export staging tenant-local on edge even when business-facing ESIR
+      access is cloud-hosted.
+    applies_to:
+      - ST_AUDIT_EVIDENCE_STATE
+      - ST_PROOF_LIFECYCLE_STATE
+      - ST_COMMAND_RECOVERY_STATE
+      - ST_EXPORT_STAGING_STATE
+
+  - id: SR_SYS_005
+    family_ref: RF_RETENTION_AND_DISPOSITION
+    statement: >
+      E_APPROVED_CONFIGURATION_RECORD, E_ENVIRONMENT_BINDING_RECORD, and
+      E_SHARED_TAXCORE_SNAPSHOT_RECORD are internal logical records and may be
+      replaced on refresh, but they must preserve last-known-good restoration and
+      operational recovery semantics.
+    applies_to:
+      - E_APPROVED_CONFIGURATION_RECORD
+      - E_ENVIRONMENT_BINDING_RECORD
+      - E_SHARED_TAXCORE_SNAPSHOT_RECORD
+
+  - id: SR_SYS_006
+    family_ref: RF_RETENTION_AND_DISPOSITION
+    statement: >
+      E_RECEIPT_SEQUENCE_COUNTER_STATE is continuity-bearing state and must be
+      durably preserved across restart, upgrade, and normal runtime cycling.
+    applies_to:
+      - E_RECEIPT_SEQUENCE_COUNTER_STATE
+
+  - id: SR_SYS_007
+    family_ref: RF_RETENTION_AND_DISPOSITION
+    statement: >
+      E_LOCAL_JOURNAL_RECORD is append-only after fiscalization and may be pruned
+      only through explicit policy-driven compaction.
+    applies_to:
+      - E_LOCAL_JOURNAL_RECORD
+
+  - id: SR_SYS_008
+    family_ref: RF_PROOF_AND_AUDIT
+    statement: >
+      AuditPackage payload shape remains canonical and must preserve key, iv, and
+      payload without local aliasing or semantic reshaping.
+    applies_to:
+      - E_AUDIT_PACKAGE_RECORD
+
+  - id: SR_SYS_009
+    family_ref: RF_PROOF_AND_AUDIT
+    statement: >
+      AuditDataStatus.commands[] must be preserved as returned command elements and
+      must not be discarded into logs or reduced to non-queryable text.
+    applies_to:
+      - E_BACKEND_COMMAND_RECORD
+      - E_BACKEND_COMMAND_INDEX
+      - E_AUDIT_PACKAGE_RECORD
+
+  - id: SR_SYS_010
+    family_ref: RF_RETENTION_AND_DISPOSITION
+    statement: >
+      Backend audit submission resolution may delete local audit package state only
+      on status 4.
+    applies_to:
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+
+  - id: SR_SYS_011
+    family_ref: RF_RETENTION_AND_DISPOSITION
+    statement: >
+      Backend audit submission resolution may retry audit package processing only on
+      status 1. Other statuses are retained, held, or otherwise dispositioned by policy.
+    applies_to:
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+
+  - id: SR_SYS_012
+    family_ref: RF_PROOF_AND_AUDIT
+    statement: >
+      During local audit, audit packages remain in E-SDC local memory until a
+      Proof-of-Audit command is received. Local export or media transfer success
+      alone is not sufficient authorization for package deletion.
+    applies_to:
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+      - E_EXPORT_RESULT_RECORD
+
+  - id: SR_SYS_013
+    family_ref: RF_PROOF_AND_AUDIT
+    statement: >
+      ProofOfAuditRequest must be composed from StartAuditApdu output plus
+      AmountStatusApdu output and must remain explicitly distinct from
+      AuditRequestPayload storage.
+    applies_to:
+      - E_AUDIT_REQUEST_PAYLOAD_RECORD
+      - E_PROOF_OF_AUDIT_REQUEST_RECORD
+
+  - id: SR_SYS_014
+    family_ref: RF_PROOF_AND_AUDIT
+    statement: >
+      Proof artifacts remain opaque proof payloads at storage level and are not
+      to be reinterpreted as public JSON verification bodies.
+    applies_to:
+      - E_PROOF_ARTIFACT_RECORD
+
+  - id: SR_SYS_015
+    family_ref: RF_RECOVERY_AND_COMMAND
+    statement: >
+      Backend authentication context is a persisted cache projection that follows
+      token validity and expiry, and may be replaced on refresh or expiry.
+    applies_to:
+      - E_BACKEND_AUTH_CONTEXT
+
+  - id: SR_SYS_016
+    family_ref: RF_RECOVERY_AND_COMMAND
+    statement: >
+      Backend command payloads remain canonical Command records; local execution,
+      acknowledgement, and compaction metadata may wrap but must not replace the
+      canonical payload.
+    applies_to:
+      - E_BACKEND_COMMAND_RECORD
+
+  - id: SR_SYS_017
+    family_ref: RF_RECOVERY_AND_COMMAND
+    statement: >
+      Readiness and recovery state must remain queryable through an explicit
+      E_READINESS_RECOVERY_SNAPSHOT record rather than being left implicit inside
+      config or command blobs.
+    applies_to:
+      - E_READINESS_RECOVERY_SNAPSHOT
+
+  - id: SR_SYS_018
+    family_ref: RF_EXPORT_AND_MEDIA
+    statement: >
+      Export staging is logically separate from durable audit backlog. Export batch,
+      staged media artifact, and export result records may be pruned after the export
+      window closes, but not in a way that silently deletes retained audit evidence.
+    applies_to:
+      - E_EXPORT_BATCH_RECORD
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+      - E_EXPORT_RESULT_RECORD
+      - E_AUDIT_PACKAGE_RECORD
+
+  - id: SR_SYS_019
+    family_ref: RF_EXPORT_AND_MEDIA
+    statement: >
+      When materialized to removable media, official local-audit filename conventions
+      apply: {UID}-{UID}-{Ordinal_Number}.json for audit packages and {UID}.commands,
+      {UID}.results, {UID}.arp for auxiliary artifacts.
+    applies_to:
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+
+  - id: SR_SYS_020
+    family_ref: RF_EXPORT_AND_MEDIA
+    statement: >
+      E_EXPORT_RESULT_RECORD must remain distinct from backend command state and
+      distinct from durable audit backlog disposition.
+    applies_to:
+      - E_EXPORT_RESULT_RECORD
+      - E_BACKEND_COMMAND_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+
+  - id: SR_SYS_021
+    family_ref: RF_PROOF_AND_AUDIT
+    statement: >
+      VerificationUrl is stored as part of fiscal evidence and not as a runtime
+      dependency on the public verification service.
+    applies_to:
+      - E_LOCAL_JOURNAL_RECORD
+
+  - id: SR_SYS_022
+    family_ref: RF_OWNERSHIP_BOUNDARY
+    statement: >
+      Reference-only journal enrichments may exist for operator search and support,
+      but they must remain visibly non-normative and must not redefine fiscal-core correctness.
+    applies_to:
+      - E_LOCAL_JOURNAL_RECORD
+
+  - id: SR_SYS_023
+    family_ref: RF_AUTHORITY_AND_CACHE
+    statement: >
+      Same-host and site-LAN local-service profiles intentionally share one local
+      storage binding family unless a later production-config change explicitly separates them.
+    applies_to:
+      - ST_SYSTEM_CONFIGURATION_STATE
+      - ST_COUNTER_STATE
+      - ST_AUDIT_EVIDENCE_STATE
+      - ST_PROOF_LIFECYCLE_STATE
+      - ST_COMMAND_RECOVERY_STATE
+      - ST_EXPORT_STAGING_STATE
+
+  - id: SR_SYS_024
+    family_ref: RF_OWNERSHIP_BOUNDARY
+    statement: >
+      Storage rules at SYS level govern store semantics, authority, and disposition.
+      They do not commit to repository APIs, table design, ORM mappings, or file-layout implementation.
+    applies_to:
+      - ST_SYSTEM_CONFIGURATION_STATE
+      - ST_COUNTER_STATE
+      - ST_AUDIT_EVIDENCE_STATE
+      - ST_PROOF_LIFECYCLE_STATE
+      - ST_COMMAND_RECOVERY_STATE
+      - ST_EXPORT_STAGING_STATE
+
+store_level_expectations:
+  - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+    expectations:
+      - durable
+      - strongly_consistent
+      - restorable
+      - cloud_primary_edge_cached_in_hosted_access
+
+  - store_ref: ST_COUNTER_STATE
+    expectations:
+      - durable
+      - continuity_critical
+      - non_ephemeral
+      - authoritative_counter_history
+
+  - store_ref: ST_AUDIT_EVIDENCE_STATE
+    expectations:
+      - durable
+      - encrypted_at_rest
+      - tenant_local_in_hosted_access
+      - retention_bound
+
+  - store_ref: ST_PROOF_LIFECYCLE_STATE
+    expectations:
+      - durable
+      - encrypted_at_rest
+      - tenant_local_in_hosted_access
+      - proof_cycle_closure_required_before_pruning
+
+  - store_ref: ST_COMMAND_RECOVERY_STATE
+    expectations:
+      - durable
+      - encrypted_at_rest
+      - operational_recovery_queryable
+      - backend_alignment_retained
+
+  - store_ref: ST_EXPORT_STAGING_STATE
+    expectations:
+      - durable_during_export_window
+      - prunable_after_outcome_closure
+      - not_canonical_audit_backlog
+      - tenant_local_in_hosted_access
+
+analysis_notes:
+  - This artifact is intended to stop SYS storage from drifting into physical schema design too early.
+  - CMP storage artifacts should later refine writer/reader ownership and access patterns, not redefine these system rules.
+  - UNT and implementation layers may introduce repository and serialization details, but must preserve these system-level storage semantics.

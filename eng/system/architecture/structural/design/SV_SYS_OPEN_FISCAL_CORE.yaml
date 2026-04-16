@@ -478,13 +478,15 @@ components:
   boundary: internal
   parent_component_id: C_OPEN_FISCAL_CORE
   components_map:
-    policy:
-      intent: Prikazati glavne domen component kandidate koji su direktno vidljivi iz sistemskih dijagrama.
-      constraints:
+  policy:
+    intent: Prikazati glavne domen component kandidate koji su direktno vidljivi iz sistemskih dijagrama.
+    constraints:
       - Ne zaključavati konačnu unutrašnju realizaciju pre component-level sekvenci i storage view-a.
-      - Zadržati jasnu razliku između facade, adapter, store i worker odgovornosti.
-      notes: E-SDC je nosilac persistent i device/backend-oriented state ownership-a; candidate component ID-jevi su standardizovani kao CC_ESDC_*.
-    components:
+      - Zadržati jasnu razliku između facade, local fiscal execution, lifecycle manager i adapter odgovornosti.
+      - Ne dozvoliti da audit/proof ownership proguta sinhroni CreateInvoice lokalni tok.
+    notes: E-SDC je nosilac persistent i device/backend-oriented state ownership-a; candidate component ID-jevi su standardizovani kao CC_ESDC_*.
+
+  components:
     - component_id: CC_ESDC_FACADE
       name: E-SDC Facade
       kind: service
@@ -492,27 +494,28 @@ components:
       boundary: facade
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_SECURE_ELEMENT
-        - port_ref: P_ESDC_USE_TAXCORE_SHARED
-        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
-        - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
-        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+          - port_ref: P_ESDC_USE_SECURE_ELEMENT
+          - port_ref: P_ESDC_USE_TAXCORE_SHARED
+          - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+          - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
+          - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
         internal_channels: []
       provides:
         ports:
-        - port_ref: P_ESDC_PROV_ESDC_SERVICE
+          - port_ref: P_ESDC_PROV_ESDC_SERVICE
         internal_channels: []
       depends_on_component_ids:
-      - CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
-      - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
-      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+        - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+        - CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+        - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+        - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
       cdd_ref: ''
       statefulness: shared
       concurrency: unknown
       failure_modes:
-      - id: FM_ESDC_RUNTIME_UNAVAILABLE
-        description: E-SDC lokalni runtime nije responzivan ili je blokiran spoljnim uslovom.
-        mitigation_expectation: Attention/GetStatus tok mora da klasifikuje stanje i vrati operatoru smislen readiness ishod.
+        - id: FM_ESDC_RUNTIME_UNAVAILABLE
+          description: E-SDC lokalni runtime nije responzivan ili je blokiran spoljnim uslovom.
+          mitigation_expectation: Attention/GetStatus tok mora da klasifikuje stanje i vrati operatoru smislen readiness ishod.
       configuration_surface:
         parameters: []
       observability_obligations:
@@ -520,20 +523,60 @@ components:
         logging:
           level: required
           correlation_fields:
-          - uid
-          - request_id
-          - command_id
+            - uid
+            - request_id
+            - command_id
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
-        - S_SYS_STATUS_AND_OPERATOR_RECOVERY
-        - S_SYS_FISCALIZE_INVOICE
-        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
-        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
-        - S_SYS_LOCAL_AUDIT_EXPORT
+          - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+          - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+          - S_SYS_FISCALIZE_INVOICE
+          - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+          - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+          - S_SYS_LOCAL_AUDIT_EXPORT
       cm_binding_ref: ''
+
+    - component_id: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+      name: Local Fiscalization Engine
+      kind: service
+      responsibility: Vodi sinhroni lokalni CreateInvoice tok: prihvat zahteva, lokalne preprovere, potpisivanje preko BE/SE, formiranje InvoiceResult i predaju audit traga u backlog ownership sloj.
+      boundary: internal
+      consumes:
+        ports:
+          - port_ref: P_ESDC_USE_SECURE_ELEMENT
+        internal_channels: []
+      provides:
+        ports: []
+        internal_channels: []
+      depends_on_component_ids:
+        - CC_ESDC_SECURE_ELEMENT_ADAPTER
+        - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+      cdd_ref: ''
+      statefulness: shared
+      concurrency: unknown
+      failure_modes:
+        - id: FM_ESDC_LOCAL_FISCALIZATION_BLOCKED
+          description: Lokalna fiskalizacija ne može da se dovrši zbog neispunjenih lokalnih uslova ili neuspešnog SE potpisa.
+          mitigation_expectation: Prevesti ishod u smislen sistemski fiscalization rezultat bez gubitka audit traga.
+      configuration_surface:
+        parameters: []
+      observability_obligations:
+        mandatory_events: []
+        logging:
+          level: required
+          correlation_fields:
+            - uid
+            - request_id
+            - invoice_number
+      traceability:
+        requirement_refs: []
+        dynamic_view_refs: []
+        scenario_refs:
+          - S_SYS_FISCALIZE_INVOICE
+      cm_binding_ref: ''
+
     - component_id: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
       name: Command Lifecycle Coordinator
       kind: worker
@@ -541,13 +584,15 @@ components:
       boundary: internal
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
-        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+          - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+          - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
         internal_channels: []
       provides:
         ports: []
         internal_channels: []
-      depends_on_component_ids: []
+      depends_on_component_ids:
+        - CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+        - CC_ESDC_REMOVABLE_MEDIA_ADAPTER
       cdd_ref: ''
       statefulness: shared
       concurrency: unknown
@@ -559,32 +604,36 @@ components:
         logging:
           level: required
           correlation_fields:
-          - command_id
-          - uid
+            - command_id
+            - uid
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
-        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
-        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
-        - S_SYS_LOCAL_AUDIT_EXPORT
+          - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+          - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+          - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+          - S_SYS_LOCAL_AUDIT_EXPORT
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
       name: Audit and Proof Lifecycle Manager
       kind: service
-      responsibility: Upravlja AuditPackage backlog-om, proof-of-audit ciklusom i lokalnim export setom.
+      responsibility: Upravlja AuditPackage backlog-om, remote audit submission ciklusom, proof-of-audit ciklusom i lokalnim export setom.
       boundary: internal
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_SECURE_ELEMENT
-        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
-        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+          - port_ref: P_ESDC_USE_SECURE_ELEMENT
+          - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+          - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
         internal_channels: []
       provides:
         ports: []
         internal_channels: []
-      depends_on_component_ids: []
+      depends_on_component_ids:
+        - CC_ESDC_SECURE_ELEMENT_ADAPTER
+        - CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+        - CC_ESDC_REMOVABLE_MEDIA_ADAPTER
       cdd_ref: ''
       statefulness: persistent
       concurrency: unknown
@@ -596,16 +645,16 @@ components:
         logging:
           level: required
           correlation_fields:
-          - uid
-          - audit_package_id
+            - uid
+            - audit_package_id
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
-        - S_SYS_LOCAL_AUDIT_EXPORT
-        - S_SYS_FISCALIZE_INVOICE
+          - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+          - S_SYS_LOCAL_AUDIT_EXPORT
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
       name: Status and Operator Recovery Manager
       kind: service
@@ -613,12 +662,13 @@ components:
       boundary: internal
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+          - port_ref: P_ESDC_USE_SECURE_ELEMENT
         internal_channels: []
       provides:
         ports: []
         internal_channels: []
-      depends_on_component_ids: []
+      depends_on_component_ids:
+        - CC_ESDC_SECURE_ELEMENT_ADAPTER
       cdd_ref: ''
       statefulness: shared
       concurrency: unknown
@@ -630,13 +680,14 @@ components:
         logging:
           level: required
           correlation_fields:
-          - uid
+            - uid
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+          - S_SYS_STATUS_AND_OPERATOR_RECOVERY
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_SECURE_ELEMENT_ADAPTER
       name: Secure Element Adapter
       kind: adapter
@@ -644,7 +695,7 @@ components:
       boundary: adapter
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_SECURE_ELEMENT
+          - port_ref: P_ESDC_USE_SECURE_ELEMENT
         internal_channels: []
       provides:
         ports: []
@@ -661,16 +712,17 @@ components:
         logging:
           level: required
           correlation_fields:
-          - uid
-          - apdu_operation
+            - uid
+            - apdu_operation
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_FISCALIZE_INVOICE
-        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
-        - S_SYS_LOCAL_AUDIT_EXPORT
+          - S_SYS_FISCALIZE_INVOICE
+          - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+          - S_SYS_LOCAL_AUDIT_EXPORT
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_TAXCORE_SHARED_ADAPTER
       name: TaxCore Shared Adapter
       kind: adapter
@@ -678,13 +730,13 @@ components:
       boundary: adapter
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_TAXCORE_SHARED
+          - port_ref: P_ESDC_USE_TAXCORE_SHARED
         internal_channels: []
       provides:
         ports: []
         internal_channels: []
       depends_on_component_ids:
-      - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+        - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
       cdd_ref: ''
       statefulness: shared
       concurrency: unknown
@@ -696,14 +748,15 @@ components:
         logging:
           level: required
           correlation_fields:
-          - environment_name
-          - request_id
+            - environment_name
+            - request_id
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+          - S_SYS_BOOTSTRAP_AND_CONFIGURATION
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
       name: TaxCore E-SDC Backend Adapter
       kind: adapter
@@ -711,13 +764,13 @@ components:
       boundary: adapter
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
+          - port_ref: P_ESDC_USE_TAXCORE_ESDC_BACKEND
         internal_channels: []
       provides:
         ports: []
         internal_channels: []
       depends_on_component_ids:
-      - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+        - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
       cdd_ref: ''
       statefulness: shared
       concurrency: unknown
@@ -729,16 +782,17 @@ components:
         logging:
           level: required
           correlation_fields:
-          - request_id
-          - command_id
-          - uid
+            - request_id
+            - command_id
+            - uid
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
-        - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+          - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+          - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
       name: PKI Client Context Adapter
       kind: adapter
@@ -746,7 +800,7 @@ components:
       boundary: adapter
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
+          - port_ref: P_ESDC_USE_PKI_CLIENT_CONTEXT
         internal_channels: []
       provides:
         ports: []
@@ -763,15 +817,16 @@ components:
         logging:
           level: required
           correlation_fields:
-          - uid
-          - certificate_subject
+            - uid
+            - certificate_subject
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_BOOTSTRAP_AND_CONFIGURATION
-        - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+          - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+          - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
       cm_binding_ref: ''
+
     - component_id: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
       name: Removable Media Adapter
       kind: adapter
@@ -779,7 +834,7 @@ components:
       boundary: adapter
       consumes:
         ports:
-        - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
+          - port_ref: P_ESDC_USE_REMOVABLE_MEDIA_IO
         internal_channels: []
       provides:
         ports: []
@@ -796,13 +851,13 @@ components:
         logging:
           level: required
           correlation_fields:
-          - uid
-          - media_mount_id
+            - uid
+            - media_mount_id
       traceability:
         requirement_refs: []
         dynamic_view_refs: []
         scenario_refs:
-        - S_SYS_LOCAL_AUDIT_EXPORT
+          - S_SYS_LOCAL_AUDIT_EXPORT
       cm_binding_ref: ''
   architectural_contract:
     responsibilities:

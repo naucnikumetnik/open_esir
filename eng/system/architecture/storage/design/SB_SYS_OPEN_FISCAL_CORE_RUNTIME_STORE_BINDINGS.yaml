@@ -1,0 +1,388 @@
+artifact_kind: storage_binding_view
+schema_version: "0.1"
+
+card:
+  id: SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+  name: Open Fiscal Core — Runtime Store Bindings
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-binding
+  level: system
+  scope: >
+    System-level logical binding of runtime stores to production-config physical
+    stores, authority modes, scope, lifetime, and cache/projection posture.
+  purpose: >
+    Make runtime-store placement and authority explicit without collapsing the
+    storage slice into a physical database schema, ORM model, or filesystem layout.
+
+traceability:
+  related_storage_view_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT
+  related_basis_ref: DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BASIS
+  related_deployment_view_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_DEPLOYMENT_MASTER
+    - DV_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE
+    - DV_SYS_OPEN_FISCAL_CORE_EMBEDDED
+    - DV_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+  related_production_config_refs:
+    - PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+    - PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+    - PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+    - PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+
+binding_policy:
+  included:
+    - logical store to physical store mapping
+    - authority mode by production config
+    - tenant and installation scope
+    - persistence lifetime
+    - cache/projection posture
+    - binding-family reuse notes
+  excluded:
+    - concrete database vendor choice
+    - concrete filesystem paths
+    - table or collection schema
+    - serialization format lock-in
+    - repository or ORM implementation
+    - migration scripts
+    - indexing strategy
+
+authority_modes:
+  - id: AUTH_LOCAL_PRIMARY
+    meaning: local copy is authoritative
+  - id: AUTH_CLOUD_PRIMARY_EDGE_CACHED
+    meaning: cloud copy is authoritative and edge copy is cached projection unless explicit fallback mode is active
+  - id: AUTH_EDGE_PRIMARY_CLOUD_COORDINATED
+    meaning: tenant-edge copy is authoritative for operational continuity while cloud may receive coordination or derived projections
+  - id: AUTH_LOCAL_ONLY
+    meaning: no cloud authority is assumed for this store
+  - id: AUTH_EPHEMERAL_STAGED_LOCAL
+    meaning: local staged state is authoritative only for the export window and closure cycle
+
+scope_kinds:
+  - id: SCOPE_INSTALLATION
+    meaning: scoped to one deployed fiscal-host installation
+  - id: SCOPE_TENANT
+    meaning: scoped to one tenant or taxpayer deployment boundary
+  - id: SCOPE_TENANT_EDGE
+    meaning: scoped to one tenant-local edge runtime
+  - id: SCOPE_FISCAL_HOST
+    meaning: scoped to one fiscal-host continuity domain
+
+lifetime_kinds:
+  - id: LIFETIME_RUNTIME_PERSISTENT
+    meaning: persists across process restarts and normal runtime cycling
+  - id: LIFETIME_CONTINUITY_PERSISTENT
+    meaning: persists to preserve continuity and counters across restarts and upgrades
+  - id: LIFETIME_RETENTION_BOUND
+    meaning: persists until explicit retention or disposition rule is satisfied
+  - id: LIFETIME_EXPORT_WINDOW
+    meaning: persists only until export outcome is closed and pruning window is satisfied
+
+binding_families:
+  - id: BND_EMBEDDED_LOCAL_FS
+    applies_to:
+      - PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+    notes: all runtime stores remain local to the embedded fiscal host
+
+  - id: BND_LOCAL_SERVICE_LOCAL_FS
+    applies_to:
+      - PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+      - PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+    notes: same-host and site-LAN local-service profiles intentionally share one local storage family
+
+  - id: BND_HOSTED_ACCESS_EDGE_LOCAL_FS
+    applies_to:
+      - PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+    notes: tenant-edge local stores retain audit/proof/command/export state and edge config cache
+
+  - id: BND_HOSTED_ACCESS_CLOUD_MANAGED
+    applies_to:
+      - PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+    notes: cloud-managed stores retain hosted config, tenant metadata, and cloud counter continuity
+
+store_bindings:
+  - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+    owner_refs:
+      - DEP_BOOTSTRAP
+    logical_entities:
+      - E_APPROVED_CONFIGURATION_RECORD
+      - E_ENVIRONMENT_BINDING_RECORD
+      - E_SHARED_TAXCORE_SNAPSHOT_RECORD
+      - E_HOSTED_COORDINATION_RECORD
+    physical_bindings:
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+        physical_store_refs:
+          - FS_OFC_CONFIG
+        binding_family_ref: BND_EMBEDDED_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_INSTALLATION
+        lifetime_ref: LIFETIME_RUNTIME_PERSISTENT
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+        physical_store_refs:
+          - FS_OFC_CONFIG
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RUNTIME_PERSISTENT
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+        physical_store_refs:
+          - FS_OFC_CONFIG
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RUNTIME_PERSISTENT
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+        physical_store_refs:
+          - FS_OFC_CLOUD_CONFIG
+          - FS_EDGE_CONFIG
+        binding_family_ref: BND_HOSTED_ACCESS_CLOUD_MANAGED+BND_HOSTED_ACCESS_EDGE_LOCAL_FS
+        authority_mode_ref: AUTH_CLOUD_PRIMARY_EDGE_CACHED
+        scope_ref: SCOPE_TENANT
+        lifetime_ref: LIFETIME_RUNTIME_PERSISTENT
+        cache_or_projection_mode: cloud_authoritative_with_edge_cached_projection
+    notes:
+      - Hosted access keeps cloud configuration authoritative while edge retains cached restore input and current binding projection.
+      - E_HOSTED_COORDINATION_RECORD exists only where hosted access actually applies.
+
+  - store_ref: ST_COUNTER_STATE
+    owner_refs:
+      - DEP_ESIR
+      - DEP_ESIR_CLOUD
+    logical_entities:
+      - E_RECEIPT_SEQUENCE_COUNTER_STATE
+    physical_bindings:
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+        physical_store_refs:
+          - FS_COUNTER_STORE
+        binding_family_ref: BND_EMBEDDED_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_CONTINUITY_PERSISTENT
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+        physical_store_refs:
+          - FS_COUNTER_STORE
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_CONTINUITY_PERSISTENT
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+        physical_store_refs:
+          - FS_COUNTER_STORE
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_CONTINUITY_PERSISTENT
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+        physical_store_refs:
+          - FS_COUNTER_STORE_CLOUD
+        binding_family_ref: BND_HOSTED_ACCESS_CLOUD_MANAGED
+        authority_mode_ref: AUTH_CLOUD_PRIMARY_EDGE_CACHED
+        scope_ref: SCOPE_TENANT
+        lifetime_ref: LIFETIME_CONTINUITY_PERSISTENT
+        cache_or_projection_mode: cloud_primary_counter_continuity
+    notes:
+      - Counter continuity is not ephemeral state.
+      - Hosted access keeps counter continuity in cloud-managed storage.
+
+  - store_ref: ST_AUDIT_EVIDENCE_STATE
+    owner_refs:
+      - DEP_ESDC
+    logical_entities:
+      - E_LOCAL_JOURNAL_RECORD
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+    physical_bindings:
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+        physical_store_refs:
+          - FS_LOCAL_AUDIT_JOURNAL
+        binding_family_ref: BND_EMBEDDED_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_ONLY
+        scope_ref: SCOPE_INSTALLATION
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+        physical_store_refs:
+          - FS_LOCAL_AUDIT_JOURNAL
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_ONLY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+        physical_store_refs:
+          - FS_LOCAL_AUDIT_JOURNAL
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_ONLY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+        physical_store_refs:
+          - FS_LOCAL_AUDIT_JOURNAL
+        binding_family_ref: BND_HOSTED_ACCESS_EDGE_LOCAL_FS
+        authority_mode_ref: AUTH_EDGE_PRIMARY_CLOUD_COORDINATED
+        scope_ref: SCOPE_TENANT_EDGE
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: tenant_edge_authoritative_evidence_store
+    notes:
+      - Audit evidence remains tenant-local in hosted access.
+      - This store is never a cloud-primary shared tenant pool in the current architecture.
+
+  - store_ref: ST_PROOF_LIFECYCLE_STATE
+    owner_refs:
+      - DEP_ESDC
+    logical_entities:
+      - E_PROOF_CYCLE_RECORD
+      - E_AUDIT_REQUEST_PAYLOAD_RECORD
+      - E_PROOF_OF_AUDIT_REQUEST_RECORD
+      - E_PROOF_ARTIFACT_RECORD
+    physical_bindings:
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+        physical_store_refs:
+          - FS_PROOF_STORE
+        binding_family_ref: BND_EMBEDDED_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_ONLY
+        scope_ref: SCOPE_INSTALLATION
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+        physical_store_refs:
+          - FS_PROOF_STORE
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_ONLY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+        physical_store_refs:
+          - FS_PROOF_STORE
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_ONLY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+        physical_store_refs:
+          - FS_PROOF_STORE
+        binding_family_ref: BND_HOSTED_ACCESS_EDGE_LOCAL_FS
+        authority_mode_ref: AUTH_EDGE_PRIMARY_CLOUD_COORDINATED
+        scope_ref: SCOPE_TENANT_EDGE
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: tenant_edge_authoritative_proof_state
+    notes:
+      - Proof cycle state remains aligned with E-SDC-owned local continuity and proof obligations.
+      - Hosted access does not move proof lifecycle state into the cloud-primary config tier.
+
+  - store_ref: ST_COMMAND_RECOVERY_STATE
+    owner_refs:
+      - DEP_ESDC
+      - DEP_STATUS_RECOVERY
+    logical_entities:
+      - E_BACKEND_AUTH_CONTEXT
+      - E_BACKEND_COMMAND_RECORD
+      - E_BACKEND_COMMAND_INDEX
+      - E_READINESS_RECOVERY_SNAPSHOT
+    physical_bindings:
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+        physical_store_refs:
+          - FS_COMMAND_STATE
+        binding_family_ref: BND_EMBEDDED_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_INSTALLATION
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+        physical_store_refs:
+          - FS_COMMAND_STATE
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+        physical_store_refs:
+          - FS_COMMAND_STATE
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_LOCAL_PRIMARY
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+        physical_store_refs:
+          - FS_COMMAND_STATE
+        binding_family_ref: BND_HOSTED_ACCESS_EDGE_LOCAL_FS
+        authority_mode_ref: AUTH_EDGE_PRIMARY_CLOUD_COORDINATED
+        scope_ref: SCOPE_TENANT_EDGE
+        lifetime_ref: LIFETIME_RETENTION_BOUND
+        cache_or_projection_mode: tenant_edge_command_and_recovery_state
+    notes:
+      - Backend alignment is remote, but command/recovery continuity remains edge-owned in hosted access.
+      - Readiness snapshot is local operational truth, not cloud config truth.
+
+  - store_ref: ST_EXPORT_STAGING_STATE
+    owner_refs:
+      - DEP_EXPORT
+    logical_entities:
+      - E_EXPORT_BATCH_RECORD
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+      - E_EXPORT_RESULT_RECORD
+    physical_bindings:
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_EMBEDDED
+        physical_store_refs:
+          - FS_EXPORT_STAGING
+        binding_family_ref: BND_EMBEDDED_LOCAL_FS
+        authority_mode_ref: AUTH_EPHEMERAL_STAGED_LOCAL
+        scope_ref: SCOPE_INSTALLATION
+        lifetime_ref: LIFETIME_EXPORT_WINDOW
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SAME_HOST
+        physical_store_refs:
+          - FS_EXPORT_STAGING
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_EPHEMERAL_STAGED_LOCAL
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_EXPORT_WINDOW
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_LOCAL_SERVICE_SITE_LAN
+        physical_store_refs:
+          - FS_EXPORT_STAGING
+        binding_family_ref: BND_LOCAL_SERVICE_LOCAL_FS
+        authority_mode_ref: AUTH_EPHEMERAL_STAGED_LOCAL
+        scope_ref: SCOPE_FISCAL_HOST
+        lifetime_ref: LIFETIME_EXPORT_WINDOW
+        cache_or_projection_mode: none
+      - production_config_ref: PC_SYS_OPEN_FISCAL_CORE_HOSTED_ACCESS
+        physical_store_refs:
+          - FS_EXPORT_STAGING
+        binding_family_ref: BND_HOSTED_ACCESS_EDGE_LOCAL_FS
+        authority_mode_ref: AUTH_EPHEMERAL_STAGED_LOCAL
+        scope_ref: SCOPE_TENANT_EDGE
+        lifetime_ref: LIFETIME_EXPORT_WINDOW
+        cache_or_projection_mode: tenant_edge_export_window_only
+    notes:
+      - Export staging is operator-triggered and not a cloud-primary state family.
+      - Hosted access keeps removable-media export local to tenant edge.
+
+global_exclusions:
+  - subject: PKI_private_keys
+    reason: outside OFC-owned runtime-store boundary
+  - subject: smart_card_applet_ownership_state
+    reason: outside OFC-owned runtime-store boundary
+  - subject: OS_secure_store_material
+    reason: outside OFC-owned runtime-store boundary
+  - subject: managed_vault_state
+    reason: outside OFC-owned runtime-store boundary
+
+analysis_notes:
+  - This artifact binds logical stores to storage families and authority modes; it is not a schema artifact.
+  - Hosted access intentionally splits cloud-managed configuration and counters from tenant-edge audit, proof, command, and export stores.
+  - Same-host and site-LAN local-service profiles intentionally share one local binding family.
