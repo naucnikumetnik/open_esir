@@ -1,0 +1,91 @@
+artifact_kind: structural_view
+schema_version: '0.2'
+card:
+  id: SV_CMP_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+  name: AuditAndProofLifecycleManager — component structural view
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-structural
+  level: component
+  scope: Unit decomposition of CC_APLM showing audit backlog management, proof lifecycle, and inline command handling.
+  purpose: Define stable unit boundaries inside AuditAndProofLifecycleManager to prevent naming drift across S_UNIT_ diagrams.
+traceability:
+  parent_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  parent_component_ref: CC_APLM
+  related_dynamic_view_refs:
+  - S_CMP_ESDC_AUDIT_AND_PROOF_MASTER
+  - S_LEAF_ESDC_SUBMIT_AUDIT_PACKAGE
+  - S_LEAF_ESDC_EXECUTE_PROOF_CYCLE
+  - S_LEAF_ESDC_COMPLETE_PROOF
+  - S_LEAF_ESDC_DETERMINE_AND_STAGE_EXPORT_SET
+units:
+- id: U_APLM_AUDIT_BACKLOG
+  name: AuditBacklogManager
+  responsibility: >
+    Manages E_AUDIT_BACKLOG_INDEX: records audit disposition per package
+    (verified_delete_local | retryable | hold_non_retryable), enumerates
+    pending packages for export, groups by SE UID, filters by environment,
+    and stages export parameters.
+  key_operations:
+  - recordAuditDisposition(packageId, status) -> void
+  - enumeratePendingPackages() -> AuditPackage[]
+  - groupAndFilterForExport(seUid, environment) -> ExportSet
+  - stageExportParameters(exportSet) -> ExportParameters
+  store_writes:
+  - entity: E_AUDIT_BACKLOG_INDEX
+    pattern_ref: AP_CMP_EVOLVE_AUDIT_BACKLOG
+  invariant_refs:
+  - INV_APS_002
+  - INV_APS_003
+- id: U_APLM_PROOF_CYCLE
+  name: ProofCycleManager
+  responsibility: >
+    Manages proof lifecycle: opens proof cycle records, persists audit
+    request payloads and proof-of-audit requests (as distinct entities per
+    INV_APS_004), tracks submission status, records proof artifacts on
+    completion, and manages retry/obligation state.
+  key_operations:
+  - openProofCycle() -> ProofCycleRecord
+  - persistAuditRequestPayload(payload) -> void
+  - composeProofOfAuditRequest(payload, sum, limit) -> ProofOfAuditRequest
+  - markProofSubmitted(cycleId) -> void
+  - recordProofArtifact(proof) -> void
+  - markProofCycleComplete(cycleId) -> void
+  - retainProofObligation(cycleId, reason) -> void
+  - retrieveProofCommand() -> Command
+  store_writes:
+  - entity: E_PROOF_CYCLE_RECORD
+    pattern_ref: AP_CMP_START_PROOF_CYCLE
+  - entity: E_AUDIT_REQUEST_PAYLOAD_RECORD
+    pattern_ref: AP_CMP_START_PROOF_CYCLE
+  - entity: E_PROOF_OF_AUDIT_REQUEST_RECORD
+    pattern_ref: AP_CMP_COMPOSE_PROOF_REQUEST
+  - entity: E_PROOF_ARTIFACT_RECORD
+    pattern_ref: AP_CMP_CLOSE_PROOF_CYCLE
+  invariant_refs:
+  - INV_APS_004
+  - INV_APS_005
+- id: U_APLM_COMMAND_HANDLER
+  name: InlineCommandHandler
+  responsibility: >
+    Applies command payloads received inline through audit/status responses
+    and tracks outcome (success or pending review).
+  key_operations:
+  - applyCommandPayload(command) -> bool
+  - markOutcomePendingReview(commandId) -> void
+unit_interfaces:
+- id: IF_U_APLM_AUDIT_BACKLOG
+  name: Audit Backlog
+  provider_unit_ref: U_APLM_AUDIT_BACKLOG
+  consumer_unit_refs:
+  - external (CC_FACADE via S_LEAF_ESDC_DETERMINE_AND_STAGE_EXPORT_SET)
+- id: IF_U_APLM_PROOF_CYCLE
+  name: Proof Cycle
+  provider_unit_ref: U_APLM_PROOF_CYCLE
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_AUDIT_AND_PROOF_MASTER)
+- id: IF_U_APLM_COMMAND_HANDLER
+  name: Inline Command Handler
+  provider_unit_ref: U_APLM_COMMAND_HANDLER
+  consumer_unit_refs:
+  - U_APLM_AUDIT_BACKLOG
+  - U_APLM_PROOF_CYCLE

@@ -1,0 +1,96 @@
+@startuml
+title Validate payments and totals — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "InvoiceRequestValidation" as CC_VAL <<component>>
+end box
+
+note over CC_VAL #FFF8DC
+S_LEAF_ESIR_VALIDATE_PAYMENTS_AND_TOTALS
+parent_ref: S_CMP_ESIR_VALIDATE_AND_PREPARE_REQUEST_MASTER / GRP_VALIDATE_PAYMENTS_AND_TOTALS
+behavior_ref: B_ESIR_FISCALIZATION_VALIDATE_REQUEST (partial — payment/totals stage)
+source_authority: fiscal_catalog/finalized_enums.csv (PaymentType), finalized_rules.csv
+end note
+
+note over CC_VAL
+  Validates payment array structure, payment method
+  enum membership, and arithmetic consistency between
+  item amounts, total amount, and payment sum.
+end note
+
+' ============================================================================
+' S1 — Validate payment array presence and structure
+' ============================================================================
+group S1 "GRP_PAYMENTS_VALIDATE_ARRAY"
+  CC_VAL -> CC_VAL : check payment[] array present and non-empty\n[step=S1.1]
+
+  alt [COND=payment[] missing or empty]
+    CC_VAL -> CC_VAL : collect missing payments error\n[step=S1.2e]\n[vals payment_errors+=<payments_required>]
+  else [COND=payment[] present]
+    loop [for each payment in payment[]]
+      CC_VAL -> CC_VAL : check payment.paymentType present and member of PaymentType enum\n[step=S1.3]\n[vals paymentType=<Cash|Card|Check|WireTransfer|Voucher|MobileMoney|Other>]
+      CC_VAL -> CC_VAL : check payment.amount present and numeric\n[step=S1.4]
+
+      alt [COND=paymentType invalid]
+        CC_VAL -> CC_VAL : collect invalid payment type error\n[step=S1.5e]\n[vals payment_errors+=<invalid_payment_type>]
+      end
+    end
+  end
+end
+
+' ============================================================================
+' S2 — Validate item amount consistency
+' ============================================================================
+group S2 "GRP_PAYMENTS_VALIDATE_ITEM_AMOUNTS"
+  CC_VAL -> CC_VAL : compute sum of (item.quantity * item.unitPrice) for all items\n[step=S2.1]\n[vals computed_item_total=<decimal>]
+  CC_VAL -> CC_VAL : check computed_item_total matches request.totalAmount\n[step=S2.2]\n[vals totalAmount=<decimal>; tolerance=<rounding_tolerance>]
+
+  alt [COND=computed_item_total != totalAmount beyond tolerance]
+    CC_VAL -> CC_VAL : collect item total mismatch error\n[step=S2.3e]\n[vals payment_errors+=<item_total_mismatch>]
+  end
+end
+
+' ============================================================================
+' S3 — Validate payment sum covers total
+' ============================================================================
+group S3 "GRP_PAYMENTS_VALIDATE_PAYMENT_SUM"
+  CC_VAL -> CC_VAL : compute sum of payment.amount for all payments\n[step=S3.1]\n[vals computed_payment_sum=<decimal>]
+  CC_VAL -> CC_VAL : check computed_payment_sum >= totalAmount\n[step=S3.2]
+
+  alt [COND=computed_payment_sum < totalAmount]
+    CC_VAL -> CC_VAL : collect insufficient payment sum error\n[step=S3.3e]\n[vals payment_errors+=<payment_sum_insufficient>]
+  end
+end
+
+' ============================================================================
+' S4 — Validate tax label consistency across items and payments
+' ============================================================================
+group S4 "GRP_PAYMENTS_VALIDATE_TAX_CONSISTENCY"
+  CC_VAL -> CC_VAL : verify all item tax labels are covered consistently across\nthe full request (no orphan labels, no unlabeled amounts)\n[step=S4.1]
+
+  alt [COND=tax label inconsistency detected]
+    CC_VAL -> CC_VAL : collect tax consistency error\n[step=S4.2e]\n[vals payment_errors+=<tax_label_inconsistency>]
+  end
+end
+
+' ============================================================================
+' S5 — Derive payment/totals validation outcome
+' ============================================================================
+group S5 "GRP_PAYMENTS_DERIVE_RESULT"
+  alt [COND=payment_errors is empty]
+    CC_VAL -> CC_VAL : payments and totals valid\n[step=S5.1]\n[vals payments_valid=true]
+  else [COND=payment_errors is non-empty]
+    CC_VAL -> CC_VAL : payments/totals validation failed\n[step=S5.2]\n[vals payments_valid=false; payment_errors=<collected_errors>]
+  end
+end
+
+@enduml

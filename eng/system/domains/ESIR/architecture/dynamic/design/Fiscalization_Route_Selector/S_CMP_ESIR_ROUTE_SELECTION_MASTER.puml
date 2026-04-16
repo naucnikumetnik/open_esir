@@ -1,0 +1,67 @@
+@startuml
+title Fiscalization route selection — ESIR domain
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsirFacade)" as CC_FACADE
+
+box "ESIR — Internal Components" #F3F3F3
+  control "FiscalizationRouteSelector" as CC_ROUTE <<component>>
+end box
+
+note over CC_FACADE, CC_ROUTE #FFF8DC
+S_CMP_ESIR_ROUTE_SELECTION_MASTER
+dynamic_view_ref: S_SYS_FISCALIZE_INVOICE / GRP_FISCALIZE_ROUTE_ONLINE, GRP_FISCALIZE_ROUTE_LOCAL
+state_machine_ref: SM_SYS_ESIR_FISCALIZATION / ST_ESIR_FISCALIZATION_ROUTE_DECISION
+behavior_ref: B_ESIR_FISCALIZATION_SELECT_ROUTE
+guard_ref: G_ESIR_FISCALIZATION_ONLINE_ALLOWED, G_ESIR_FISCALIZATION_LOCAL_ALLOWED
+end note
+
+note over CC_ROUTE
+  FiscalizationRouteSelector is a pure-function component: no external
+  dependencies. It evaluates online and local path availability from
+  cached readiness context (captured by S_SYS_STATUS_AND_OPERATOR_RECOVERY)
+  and applies the configured fiscalization mode policy.
+
+  Internal evaluation (collapsed — no inter-component calls):
+    Online path (G_ESIR_FISCALIZATION_ONLINE_ALLOWED):
+      configuredMode includes V-SDC, PFX certificate valid, V-SDC endpoint reachable
+    Local path (G_ESIR_FISCALIZATION_LOCAL_ALLOWED):
+      configuredMode includes E-SDC, E-SDC Attention reachable, SE PIN verified,
+      audit not blocking, SE certificate valid
+    Policy resolution:
+      V_SDC → online only; E_SDC → local only
+      PREFER_ONLINE → online primary, local fallback
+      PREFER_LOCAL → local primary, online fallback
+      Neither available → UNAVAILABLE
+end note
+
+' ============================================================================
+' S1 — Facade requests route selection
+' ============================================================================
+group S1 "GRP_ROUTE_SELECT"
+  CC_FACADE -> CC_ROUTE : IF_CMP_ESIR_FISCALIZATION_ROUTE_SELECTOR.selectRoute(readinessContext:ReadinessContext, configuredMode:FiscalizationMode) -> Result[RouteSelectionResult]\n[step=S1.1]\n[vals configuredMode=<V_SDC|E_SDC|PREFER_ONLINE|PREFER_LOCAL>; readinessContext=<cached_serving_state>]
+  activate CC_ROUTE
+
+  alt [COND=ROUTE_RESOLVED route=ONLINE]
+    CC_ROUTE --> CC_FACADE : [step=S1.1a]\n[vals result.outcome=ok; result.ok.route=ONLINE; result.ok.reason=<available>]
+    deactivate CC_ROUTE
+
+  else [COND=ROUTE_RESOLVED route=LOCAL]
+    CC_ROUTE --> CC_FACADE : [step=S1.1b]\n[vals result.outcome=ok; result.ok.route=LOCAL; result.ok.reason=<available>]
+    deactivate CC_ROUTE
+
+  else [COND=ROUTE_UNAVAILABLE — neither path available for configured policy]
+    CC_ROUTE --> CC_FACADE : [step=S1.1err]\n[vals result.outcome=err; result.err.code=ROUTE_UNAVAILABLE; result.err.online_reason=<unreachable|not_configured|certificate_expired>; result.err.local_reason=<esdc_unavailable|pin_required|audit_blocking|se_locked>]
+    deactivate CC_ROUTE
+  end
+end
+
+@enduml

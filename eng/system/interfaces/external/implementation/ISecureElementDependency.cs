@@ -2,6 +2,7 @@ namespace OpenFiscalCore.System.Interfaces.External;
 
 using OpenFiscalCore.System.Domains.ESDC.Types.Primitives;
 using OpenFiscalCore.System.Domains.ESDC.Types.SecureElement;
+using OpenFiscalCore.System.Types.Primitives;
 
 /// <summary>
 /// Provides the secure-element APDU dependency used by local fiscalization and audit flows.
@@ -164,4 +165,242 @@ public interface ISecureElementDependency
     ///       completion.
     /// </remarks>
     void EndAuditApdu(ProofOfAudit proof);
+
+    /// <summary>
+    /// Returns the last signed invoice payload from the secure element.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///
+    /// Effects:
+    ///     - Executes the get-last-signed-invoice APDU flow.
+    ///     - Returns the previously signed invoice fields including counters,
+    ///       encrypted internal data, and digital signature.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="LastSignedInvoiceResponse" />.
+    /// </remarks>
+    LastSignedInvoiceResponse GetLastSignedInvoiceApdu();
+
+    /// <summary>
+    /// Returns the secure-element applet firmware version.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///
+    /// Effects:
+    ///     - Executes the get-version APDU flow.
+    ///     - Returns a structured major/minor/patch version.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="SecureElementVersionResponse" />.
+    /// </remarks>
+    SecureElementVersionResponse GetSecureElementVersion();
+
+    /// <summary>
+    /// Returns the certificate parameters stored on the secure element.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///     - SE applet version must be 3.2.8 or higher.
+    ///
+    /// Effects:
+    ///     - Executes the get-cert-params APDU flow.
+    ///     - Returns UID and certificate validity window.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="SecureElementCertParamsResponse" />.
+    /// </remarks>
+    SecureElementCertParamsResponse GetCertParams();
+
+    /// <summary>
+    /// Forwards a TaxCore backend directive payload to the secure element.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///     - The caller provides a canonical
+    ///       <see cref="ForwardSecureElementDirectiveRequest" />.
+    ///
+    /// Effects:
+    ///     - Transmits the directive payload to the secure element.
+    ///     - Does not return a business payload.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: none
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent successful
+    ///       directive delivery.
+    /// </remarks>
+    void ForwardSecureElementDirective(ForwardSecureElementDirectiveRequest request);
+
+    /// <summary>
+    /// Returns the number of remaining PIN verification attempts before lockout.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///     - SE applet version must be 3.1.1 or higher.
+    ///
+    /// Effects:
+    ///     - Executes the get-pin-tries-left APDU flow.
+    ///     - Returns a <see cref="PinTriesLeft" /> value where 0x00 means
+    ///       PIN blocked and 0x01–0x03 means remaining attempts.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="PinTriesLeft" />.
+    /// </remarks>
+    PinTriesLeft GetPinTriesLeft();
+
+    /// <summary>
+    /// Exports the DER-encoded certificate from the PKI applet on the secure element.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable.
+    ///     - The PKI applet must be selected before this operation.
+    ///
+    /// Effects:
+    ///     - Executes the export-certificate APDU flow against the PKI applet.
+    ///     - Returns the raw DER-encoded certificate payload.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="ExportedCertificateDer" />.
+    /// </remarks>
+    ExportedCertificateDer ExportCertificateApdu();
+
+    /// <summary>
+    /// Exports the TaxCore public key from the secure element.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///
+    /// Effects:
+    ///     - Executes the export-public-key APDU flow.
+    ///     - Returns the raw TaxCore public key payload (259 bytes).
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="TaxCorePublicKey" />.
+    /// </remarks>
+    TaxCorePublicKey ExportTaxCorePublicKeyApdu();
+
+    /// <summary>
+    /// Exports the opaque audit data from the secure element for local audit export.
+    /// </summary>
+    /// <remarks>
+    /// Preconditions:
+    ///     - The secure-element session is usable and the SE applet is
+    ///       selected.
+    ///
+    /// Effects:
+    ///     - Executes the export-audit-data APDU flow.
+    ///     - Returns the opaque audit data payload.
+    ///
+    /// Interaction control:
+    ///     - admission_policy: none
+    ///     - duplicate_policy: allow
+    ///     - concurrency_policy: unrestricted
+    ///     - overload_policy: none
+    ///     - timing_budget: none
+    ///     - observability_on_trigger: none
+    ///
+    /// Timing:
+    ///     - Depends on device, reader, and secure-element response latency.
+    ///
+    /// Errors:
+    ///     - APDU status or device-path failure prevent a successful
+    ///       <see cref="ExportedAuditData" />.
+    /// </remarks>
+    ExportedAuditData ExportAuditDataApdu();
 }

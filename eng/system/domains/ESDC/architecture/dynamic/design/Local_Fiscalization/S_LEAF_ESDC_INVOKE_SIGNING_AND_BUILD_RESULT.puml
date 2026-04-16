@@ -1,0 +1,80 @@
+@startuml
+title Invoke SE signing and build invoice result — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "LocalFiscalizationEngine" as CC_LFE <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_LFE, EXT_SE #FFF8DC
+S_LEAF_ESDC_INVOKE_SIGNING_AND_BUILD_RESULT
+parent_ref: S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER / GRP_LOCAL_FISC_SIGN_AND_BUILD
+behavior_ref: B_ESDC_LOCAL_FISCALIZATION_INVOKE_SIGNING, B_ESDC_LOCAL_FISCALIZATION_BUILD_RESULT
+end note
+
+note over CC_LFE, CC_SEA
+  LocalFiscalizationEngine delegates APDU signing to SecureElementAdapter.
+  SE responds with signed data or APDU error status.
+  On success, the engine builds the full InvoiceResult including
+  verification URL, textual journal, and invoice number.
+end note
+
+' ============================================================================
+' S1 — Invoke SE signing via adapter
+' ============================================================================
+group S1 "GRP_SIGN_INVOKE_SE"
+  CC_LFE -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.signInvoice(sign_request:SignInvoiceApduRequest) -> Result[SignInvoiceApduResponse]\n[step=S1.1]\n[connection use_port=P_LFE_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_LFE__SEA__SECURE_ELEMENT]\n[vals sign_request=<SignInvoiceApduRequest>]
+  activate CC_SEA
+
+  CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.SignInvoiceApdu(request:SignInvoiceApduRequest) -> SignInvoiceApduResponse\n[step=S1.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]\n[CTR-011 · APDU CLA 0x88 INS 0x13]
+  activate EXT_SE
+
+  alt [COND=se_apdu_status != 0x9000]
+    EXT_SE --> CC_SEA : [step=S1.2e]\n[vals error=SE_APDU_STATUS]
+    deactivate EXT_SE
+    CC_SEA --> CC_LFE : [step=S1.1e]\n[vals error=SE_APDU_STATUS; signing_succeeded=false]
+    deactivate CC_SEA
+
+  else [COND=se_apdu_status == 0x9000]
+    EXT_SE --> CC_SEA : [step=S1.2r]\n[vals result=SignInvoiceApduResponse(signature, counter, sdcDateTime)]
+    deactivate EXT_SE
+    CC_SEA --> CC_LFE : [step=S1.1r]\n[vals result=SignInvoiceApduResponse; signing_succeeded=true]
+    deactivate CC_SEA
+  end
+end
+
+' ============================================================================
+' S2 — Build verification URL
+' ============================================================================
+group S2 "GRP_SIGN_BUILD_VERIFICATION_URL"
+  CC_LFE -> CC_LFE : compose verification URL from signed data, environment config,\nand verification service base URL\n[step=S2.1]\n[vals verificationUrl=<constructed_url>]
+end
+
+' ============================================================================
+' S3 — Build textual journal
+' ============================================================================
+group S3 "GRP_SIGN_BUILD_JOURNAL"
+  CC_LFE -> CC_LFE : compose textual journal from invoice data, signature,\ncounter, and SE datetime for receipt printing\n[step=S3.1]\n[vals journal=<textual_receipt_representation>]
+end
+
+' ============================================================================
+' S4 — Assemble InvoiceResult
+' ============================================================================
+group S4 "GRP_SIGN_ASSEMBLE_RESULT"
+  CC_LFE -> CC_LFE : assemble InvoiceResult from signed data, verification URL, and journal\n[step=S4.1]\n[vals result=InvoiceResult(invoiceNumber=<from_counter>, verificationUrl=<url>, journal=<text>)]
+end
+
+@enduml

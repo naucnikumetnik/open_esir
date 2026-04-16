@@ -1,0 +1,89 @@
+@startuml
+title Validate invoice fields — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "InvoiceRequestValidation" as CC_VAL <<component>>
+end box
+
+note over CC_VAL #FFF8DC
+S_LEAF_ESIR_VALIDATE_INVOICE_FIELDS
+parent_ref: S_CMP_ESIR_VALIDATE_AND_PREPARE_REQUEST_MASTER / GRP_VALIDATE_INVOICE_FIELDS
+behavior_ref: B_ESIR_FISCALIZATION_VALIDATE_REQUEST (partial — field stage)
+source_authority: fiscal_catalog/finalized_fields.csv, finalized_rules.csv
+end note
+
+note over CC_VAL
+  Validates mandatory invoice-level fields and item-level
+  completeness against fiscal catalog field and rule definitions.
+
+  Tax label validity is checked against the current TaxRatesResponse.
+end note
+
+' ============================================================================
+' S1 — Validate mandatory top-level fields
+' ============================================================================
+group S1 "GRP_FIELDS_VALIDATE_MANDATORY_TOP_LEVEL"
+  CC_VAL -> CC_VAL : check invoiceType present and member of InvoiceType enum\n[step=S1.1]\n[vals invoiceType=<Normal|Proforma|Copy|Training>]
+  CC_VAL -> CC_VAL : check transactionType present and member of TransactionType enum\n[step=S1.2]\n[vals transactionType=<Sale|Refund>]
+  CC_VAL -> CC_VAL : check dateTimeCreated present and valid ISO 8601 datetime\n[step=S1.3]
+  CC_VAL -> CC_VAL : check cashier present and non-empty string\n[step=S1.4]
+  CC_VAL -> CC_VAL : check invoiceNumber present and non-empty string\n[step=S1.5]
+  CC_VAL -> CC_VAL : check items[] array present and non-empty\n[step=S1.6]
+
+  alt [COND=any mandatory field missing or invalid]
+    CC_VAL -> CC_VAL : collect field-level errors\n[step=S1.7e]\n[vals fields_valid=false; field_errors=<ValidationErrorResponse[]>]
+  end
+end
+
+' ============================================================================
+' S2 — Validate item-level completeness
+' ============================================================================
+group S2 "GRP_FIELDS_VALIDATE_ITEMS"
+  loop [for each item in items[]]
+    CC_VAL -> CC_VAL : check item.name present and non-empty\n[step=S2.1]
+    CC_VAL -> CC_VAL : check item.quantity present and > 0\n[step=S2.2]
+    CC_VAL -> CC_VAL : check item.unitPrice present\n[step=S2.3]
+    CC_VAL -> CC_VAL : check item.labels[] present and non-empty\n[step=S2.4]
+
+    alt [COND=item field missing or invalid]
+      CC_VAL -> CC_VAL : collect item-level error with item index\n[step=S2.5e]\n[vals field_errors+=<item_error>]
+    end
+  end
+end
+
+' ============================================================================
+' S3 — Validate tax labels against current tax rates
+' ============================================================================
+group S3 "GRP_FIELDS_VALIDATE_TAX_LABELS"
+  loop [for each item in items[]]
+    loop [for each label in item.labels[]]
+      CC_VAL -> CC_VAL : check label exists in taxRates.currentTaxRates\n[step=S3.1]\n[vals label=<tax_label>; taxRates=<TaxRatesResponse>]
+
+      alt [COND=label not found in current tax rates]
+        CC_VAL -> CC_VAL : collect invalid label error\n[step=S3.2e]\n[vals field_errors+=<unknown_tax_label_error>]
+      end
+    end
+  end
+end
+
+' ============================================================================
+' S4 — Derive field validation outcome
+' ============================================================================
+group S4 "GRP_FIELDS_DERIVE_RESULT"
+  alt [COND=field_errors is empty]
+    CC_VAL -> CC_VAL : all invoice fields valid\n[step=S4.1]\n[vals fields_valid=true]
+  else [COND=field_errors is non-empty]
+    CC_VAL -> CC_VAL : field validation failed\n[step=S4.2]\n[vals fields_valid=false; field_errors=<collected_errors>]
+  end
+end
+
+@enduml

@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>OpenFiscalCore.System.Domains.ESIR.Types</name>
+    </assembly>
+    <members>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.RequestReceived">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_REQUEST_RECEIVED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.ValidatingAndPreparing">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_VALIDATING_AND_PREPARING.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.RouteDecision">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_ROUTE_DECISION.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.ExecutingOnline">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_EXECUTING_ONLINE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.ExecutingLocal">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_EXECUTING_LOCAL.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.Succeeded">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_SUCCEEDED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirFiscalizationState.Failed">
+            <summary>Corresponds to ST_ESIR_FISCALIZATION_FAILED.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirServingState.Starting">
+            <summary>Corresponds to ST_ESIR_STARTING.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirServingState.Accepting">
+            <summary>Corresponds to ST_ESIR_ACCEPTING.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirServingState.DegradedOfflineCapable">
+            <summary>Corresponds to ST_ESIR_DEGRADED_OFFLINE_CAPABLE.</summary>
+        </member>
+        <member name="F:OpenFiscalCore.System.Domains.ESIR.Types.States.EsirServingState.Blocked">
+            <summary>Corresponds to ST_ESIR_BLOCKED.</summary>
+        </member>
+    </members>
+</doc>

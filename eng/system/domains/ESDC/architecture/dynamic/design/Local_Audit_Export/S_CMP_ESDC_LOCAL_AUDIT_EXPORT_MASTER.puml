@@ -1,0 +1,114 @@
+@startuml
+title Local audit export — E-SDC domain master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+actor "Operator" as OP
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+  control "RemovableMediaAdapter" as CC_RMA <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  storage "Removable Media\n(SD Card / USB)" as EXT_MEDIA <<external>>
+  entity  "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over OP, EXT_SE #FFF8DC
+S_CMP_ESDC_LOCAL_AUDIT_EXPORT_MASTER
+[semantics lifecycle_spine=true]
+dynamic_view_ref: S_SYS_LOCAL_AUDIT_EXPORT
+state_machine_ref: SM_SYS_ESDC_LOCAL_AUDIT_EXPORT
+end note
+
+note over CC_RMA, CC_APLM
+  Local audit export is triggered by removable media insertion.
+  Flow: detect and validate media → import media commands →
+  determine export set → write audit packages and optional ARP to media.
+  Exported packages remain in local storage until proof-of-audit clears them.
+end note
+
+' ============================================================================
+' S1 — Operator inserts media, detect and validate (inter-component: RMA → MEDIA)
+' ============================================================================
+group S1 "GRP_LOCAL_EXPORT_TRIGGER"
+  OP -> EXT_MEDIA : insert removable media\n[step=S1.1]
+
+  ref over CC_FACADE, CC_RMA, EXT_MEDIA
+    expand=S_LEAF_ESDC_DETECT_AND_VALIDATE_MEDIA
+    ref_mode=call_return
+  end ref
+end
+
+alt [COND=media_invalid]
+  CC_FACADE --> OP : [step=S1.reject]\n[vals result=LocalAuditExportResult(media_invalid)]
+
+else [COND=media_ready]
+
+  ' ==========================================================================
+  ' S2 — Import and execute media-delivered commands (inter-component: RMA → MEDIA)
+  ' ==========================================================================
+  group S2 "GRP_LOCAL_EXPORT_IMPORT_COMMANDS"
+    ref over CC_FACADE, CC_RMA, EXT_MEDIA
+      expand=S_LEAF_ESDC_IMPORT_MEDIA_COMMANDS
+      ref_mode=call_return
+    end ref
+  end
+
+  ' ==========================================================================
+  ' S3 — Determine export set (internal to APLM — collapsed)
+  ' ==========================================================================
+  group S3 "GRP_LOCAL_EXPORT_DETERMINE_SET"
+    CC_FACADE -> CC_APLM : IF_CMP_ESDC_AUDIT_AND_PROOF.determineExportSet(seUid:string, environment:string) -> Result[ExportSetResult]\n[step=S3.1]\n[vals seUid=<active_se_uid>; environment=<target_env>]
+    activate CC_APLM
+    note over CC_APLM
+      Determine export set (collapsed — no further inter-component calls):
+        - Enumerate pending local AuditPackage backlog
+        - Group by active Secure Element UID
+        - Filter by current target environment
+        - Derive export_count and arp_required flag
+      behavior_ref: B_ESDC_LOCAL_AUDIT_EXPORT_DETERMINE_SET
+    end note
+
+    alt [COND=pending_packages_present]
+      CC_APLM --> CC_FACADE : [step=S3.1r]\n[vals result.outcome=ok; result.ok=ExportSetResult(pending=true; count=<k>; arp_required=<bool>)]
+      deactivate CC_APLM
+    else [COND=no_pending_packages after filter]
+      CC_APLM --> CC_FACADE : [step=S3.1e]\n[vals result.outcome=ok; result.ok=ExportSetResult(pending=false; count=0)]
+      deactivate CC_APLM
+    end
+  end
+
+  ' ==========================================================================
+  ' S4 — Write export artifacts to media (inter-component: RMA → MEDIA, SEA → SE)
+  ' ==========================================================================
+  alt [COND=pending_packages_present]
+    group S4 "GRP_LOCAL_EXPORT_WRITE"
+      ref over CC_FACADE, CC_RMA, CC_APLM, CC_SEA, EXT_MEDIA, EXT_SE
+        expand=S_LEAF_ESDC_WRITE_EXPORT_ARTIFACTS
+        ref_mode=call_return
+      end ref
+    end
+  end
+
+  ' ==========================================================================
+  ' S5 — Close export outcome
+  ' ==========================================================================
+  group S5 "GRP_LOCAL_EXPORT_CLOSE"
+    CC_FACADE --> OP : [step=S5.1r]\n[vals result=LocalAuditExportResult(outcome=<export_completed|commands_processed_and_export_completed|no_pending_packages>)]
+  end
+
+end
+
+@enduml

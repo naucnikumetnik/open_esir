@@ -1,0 +1,64 @@
+@startuml
+title Resolve audit package disposition — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+end box
+
+note over CC_APLM #FFF8DC
+S_LEAF_ESDC_RESOLVE_AUDIT_DISPOSITION
+parent_ref: S_CMP_ESDC_AUDIT_AND_PROOF_MASTER / GRP_AUDIT_RESOLVE_DISPOSITION
+behavior_ref: B_ESDC_AUDIT_AND_PROOF_RESOLVE_DISPOSITION
+end note
+
+note over CC_APLM
+  After SubmitAuditPackage returns AuditDataStatus per package,
+  the manager resolves the local disposition: whether to delete the
+  local copy, retain for retry, or hold without resubmission.
+  This also determines whether the proof cycle must be triggered.
+end note
+
+' ============================================================================
+' S1 — Process disposition per submitted package
+' ============================================================================
+group S1 "GRP_RESOLVE_DISPOSITION_LOOP"
+  loop [COND=for each submitted AuditPackage with recorded status]
+
+    CC_APLM -> CC_APLM : read recorded audit_status for package\n[step=S1.1]\n[vals packageId=<pkg.id>; status=<audit_status>]
+
+    alt [COND=audit_status == verified_delete_local]
+      CC_APLM -> CC_APLM : delete local AuditPackage copy from non-volatile storage\n[step=S1.2a]\n[vals action=delete; packageId=<pkg.id>; backlog_decremented=true]
+
+    else [COND=audit_status == retryable]
+      CC_APLM -> CC_APLM : keep AuditPackage in backlog for next submission cycle\n[step=S1.2b]\n[vals action=retain_retry; packageId=<pkg.id>]
+
+    else [COND=audit_status == hold_non_retryable]
+      CC_APLM -> CC_APLM : retain AuditPackage without immediate resubmission\n[step=S1.2c]\n[vals action=hold; packageId=<pkg.id>; requires_operator=true]
+    end
+
+  end
+end
+
+' ============================================================================
+' S2 — Evaluate proof-of-audit obligation
+' ============================================================================
+group S2 "GRP_EVALUATE_PROOF_OBLIGATION"
+  CC_APLM -> CC_APLM : check whether proof cycle is now required\n[step=S2.1]\n[vals proof_requested_in_response=<bool>; last_proof_age=<duration>; proof_interval=<configured_interval>]
+
+  alt [COND=proof_requested_in_response OR proof_interval_elapsed]
+    CC_APLM -> CC_APLM : mark proof_due = true\n[step=S2.2a]\n[vals proof_due=true]
+  else [COND=proof not required]
+    CC_APLM -> CC_APLM : mark proof_due = false\n[step=S2.2b]\n[vals proof_due=false]
+  end
+end
+
+@enduml

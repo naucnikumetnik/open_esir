@@ -1,0 +1,78 @@
+artifact_kind: structural_view
+schema_version: '0.2'
+card:
+  id: SV_CMP_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+  name: CommandLifecycleCoordinator — component structural view
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-structural
+  level: component
+  scope: Unit decomposition of CC_CLC showing auth context management, command backlog, and command execution.
+  purpose: Define stable unit boundaries inside CommandLifecycleCoordinator to prevent naming drift across S_UNIT_ diagrams.
+traceability:
+  parent_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  parent_component_ref: CC_CLC
+  related_dynamic_view_refs:
+  - S_CMP_ESDC_BACKEND_SYNC_MASTER
+  - S_LEAF_ESDC_ENSURE_AUTH_CONTEXT
+  - S_LEAF_ESDC_ANNOUNCE_STATUS_AND_CAPTURE_COMMANDS
+  - S_LEAF_ESDC_EXECUTE_COMMANDS
+  - S_LEAF_ESDC_REPORT_COMMAND_OUTCOMES
+units:
+- id: U_CLC_AUTH_CONTEXT
+  name: AuthContextManager
+  responsibility: >
+    Manages TaxCoreAuthenticationToken lifecycle: checks cached token
+    validity, delegates certificate context read and token request to
+    adapters, caches valid tokens until expiration.
+  key_operations:
+  - checkCachedTokenValidity() -> bool
+  - reuseCachedToken() -> AuthenticationToken
+  - cacheToken(token, expiresAt) -> void
+- id: U_CLC_COMMAND_BACKLOG
+  name: CommandBacklogManager
+  responsibility: >
+    Manages E_BACKEND_COMMAND_RECORD and E_BACKEND_COMMAND_INDEX: persists
+    commands received from status and initialization responses, appends
+    initialization commands, removes acknowledged commands, retains
+    failed commands for next cycle.
+  key_operations:
+  - persistCommands(commands) -> void
+  - appendInitializationCommands(commands) -> void
+  - removeCommand(commandId) -> void
+  - retainCommand(commandId) -> void
+  - getPendingCommands() -> Command[]
+  store_writes:
+  - entity: E_BACKEND_COMMAND_RECORD
+    pattern_ref: AP_CMP_CAPTURE_COMMANDS
+  - entity: E_BACKEND_COMMAND_INDEX
+    pattern_ref: AP_CMP_CAPTURE_COMMANDS
+- id: U_CLC_COMMAND_EXECUTOR
+  name: CommandExecutor
+  responsibility: >
+    Classifies command type (NTP_CONFIG, TAX_RATE_UPDATE, CERT_UPDATE,
+    ROOT_CERT_UPDATE, ENV_URL_CONFIG, SE_DIRECTIVE), applies configuration
+    payloads to local state or relays SE directives to SecureElementAdapter,
+    and tracks execution outcomes.
+  key_operations:
+  - classifyCommandType(command) -> CommandType
+  - applyConfigurationPayload(payload) -> Result[void]
+  - markOutcome(commandId, success) -> void
+  store_writes:
+  - entity: ST_SYSTEM_CONFIGURATION_STATE
+    pattern_ref: AP_CMP_APPLY_AND_ACK_COMMAND
+unit_interfaces:
+- id: IF_U_CLC_AUTH_CONTEXT
+  name: Auth Context
+  provider_unit_ref: U_CLC_AUTH_CONTEXT
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_BACKEND_SYNC_MASTER)
+- id: IF_U_CLC_COMMAND_BACKLOG
+  name: Command Backlog
+  provider_unit_ref: U_CLC_COMMAND_BACKLOG
+  consumer_unit_refs:
+  - U_CLC_COMMAND_EXECUTOR
+- id: IF_U_CLC_COMMAND_EXECUTOR
+  name: Command Executor
+  provider_unit_ref: U_CLC_COMMAND_EXECUTOR
+  consumer_unit_refs:
+  - external (orchestrated by S_CMP_ESDC_BACKEND_SYNC_MASTER step S4)

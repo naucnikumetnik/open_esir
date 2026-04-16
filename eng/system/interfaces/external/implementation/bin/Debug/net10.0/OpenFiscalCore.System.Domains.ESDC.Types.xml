@@ -24,6 +24,18 @@
             internal models before making command-type-specific decisions.
             </remarks>
         </member>
+        <member name="T:OpenFiscalCore.System.Domains.ESDC.Types.RuntimeStore.RuntimeStoreBindingConfig">
+            <summary>
+                Maps logical runtime stores to filesystem root paths.
+                Defaults match PC_SYS_OPEN_FISCAL_CORE_EMBEDDED storage policy.
+            </summary>
+        </member>
+        <member name="M:OpenFiscalCore.System.Domains.ESDC.Types.RuntimeStore.RuntimeStoreBindingConfig.#ctor(System.String,System.String,System.String,System.String,System.String,System.String)">
+            <summary>
+                Maps logical runtime stores to filesystem root paths.
+                Defaults match PC_SYS_OPEN_FISCAL_CORE_EMBEDDED storage policy.
+            </summary>
+        </member>
         <member name="F:OpenFiscalCore.System.Domains.ESDC.Types.States.EsdcAuditAndProofState.Idle">
             <summary>Corresponds to ST_ESDC_AUDIT_AND_PROOF_IDLE.</summary>
         </member>

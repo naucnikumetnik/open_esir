@@ -118,8 +118,25 @@ adapters:
     source_scenarios:
       - S_SYS_FISCALIZE_INVOICE
       - S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+      - S_SYS_BOOTSTRAP_AND_CONFIGURATION
+      - S_SYS_STATUS_AND_OPERATOR_RECOVERY
+      - S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+    contract_operations:
+      - SignInvoiceApdu
+      - StartAuditApdu
+      - AmountStatusApdu
+      - EndAuditApdu
+      - GetLastSignedInvoiceApdu
+      - GetSecureElementVersion
+      - GetCertParams
+      - ForwardSecureElementDirective
+      - GetPinTriesLeft
+      - ExportCertificateApdu
+      - ExportTaxCorePublicKeyApdu
+      - ExportAuditDataApdu
     config_surface:
       - SecureElementApplicationIdHex
+      - PkiApplicationIdHex
       - AutoSelectApplication
     error_translation_responsibility: Translate transport-delegate, APDU status-word, and payload-layout failures into canonical device or protocol failures.
 

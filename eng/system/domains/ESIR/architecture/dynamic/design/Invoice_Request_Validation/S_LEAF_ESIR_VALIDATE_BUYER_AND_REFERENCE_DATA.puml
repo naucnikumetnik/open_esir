@@ -1,0 +1,94 @@
+@startuml
+title Validate buyer and reference data — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "InvoiceRequestValidation" as CC_VAL <<component>>
+end box
+
+note over CC_VAL #FFF8DC
+S_LEAF_ESIR_VALIDATE_BUYER_AND_REFERENCE_DATA
+parent_ref: S_CMP_ESIR_VALIDATE_AND_PREPARE_REQUEST_MASTER / GRP_VALIDATE_BUYER_AND_REFERENCE
+behavior_ref: B_ESIR_FISCALIZATION_VALIDATE_REQUEST (partial — buyer/reference stage)
+source_authority: fiscal_catalog/finalized_rules.csv, ifarnikjedinstvenogIDkupca_ver_116_18122023.pdf
+end note
+
+note over CC_VAL
+  Validates buyer identification and referent document data.
+
+  Buyer ID format is checked against the official codebook.
+  Referent document fields are required when transactionType
+  mandates a reference (Refund, Copy, Voiding scenarios).
+end note
+
+' ============================================================================
+' S1 — Validate buyer identification (optional presence, required format)
+' ============================================================================
+group S1 "GRP_BUYER_VALIDATE_BUYER_ID"
+  alt [COND=buyerId present]
+    CC_VAL -> CC_VAL : determine buyer ID type from prefix/format\n[step=S1.1]\n[vals buyerIdType=<TaxId|PIB|JMBG|PassportNumber|BuyerCostCenterId|Other>]
+
+    CC_VAL -> CC_VAL : validate buyer ID format per buyer ID codebook rules\n[step=S1.2]\n[vals buyerId=<value>; expected_format=<codebook_rule_for_type>]
+
+    alt [COND=buyer ID format invalid]
+      CC_VAL -> CC_VAL : collect buyer ID format error\n[step=S1.3e]\n[vals buyer_errors+=<invalid_buyer_id_format>]
+    end
+
+    alt [COND=buyerCostCenterId present]
+      CC_VAL -> CC_VAL : validate buyerCostCenterId non-empty and well-formed\n[step=S1.4]\n[vals buyerCostCenterId=<value>]
+
+      alt [COND=buyerCostCenterId invalid]
+        CC_VAL -> CC_VAL : collect cost center ID error\n[step=S1.5e]\n[vals buyer_errors+=<invalid_buyer_cost_center_id>]
+      end
+    end
+
+  else [COND=buyerId not present]
+    CC_VAL -> CC_VAL : buyer identification not provided (optional for most transaction types)\n[step=S1.6]
+  end
+end
+
+' ============================================================================
+' S2 — Validate referent document fields (conditional requirement)
+' ============================================================================
+group S2 "GRP_BUYER_VALIDATE_REFERENT_DOCUMENT"
+  CC_VAL -> CC_VAL : determine if referent document is required by transaction type and invoice type\n[step=S2.1]\n[vals transactionType=<Sale|Refund>; invoiceType=<Normal|Copy|Proforma|Training>; requires_reference=<bool>]
+
+  alt [COND=requires_reference == true]
+    CC_VAL -> CC_VAL : check referentDocumentNumber present and non-empty\n[step=S2.2]
+    CC_VAL -> CC_VAL : check referentDocumentDT present and valid ISO 8601 datetime\n[step=S2.3]
+
+    alt [COND=referentDocumentNumber missing or empty]
+      CC_VAL -> CC_VAL : collect missing referent document number error\n[step=S2.4e]\n[vals buyer_errors+=<referent_document_number_required>]
+    end
+
+    alt [COND=referentDocumentDT missing or invalid]
+      CC_VAL -> CC_VAL : collect missing referent document datetime error\n[step=S2.5e]\n[vals buyer_errors+=<referent_document_dt_required>]
+    end
+
+  else [COND=requires_reference == false]
+    alt [COND=referentDocumentNumber or referentDocumentDT present]
+      CC_VAL -> CC_VAL : referent document fields present but not required by transaction type\n[step=S2.6]\n[vals warning=referent_fields_present_but_not_required]
+    end
+  end
+end
+
+' ============================================================================
+' S3 — Derive buyer/reference validation outcome
+' ============================================================================
+group S3 "GRP_BUYER_DERIVE_RESULT"
+  alt [COND=buyer_errors is empty]
+    CC_VAL -> CC_VAL : buyer and reference data valid\n[step=S3.1]\n[vals buyer_valid=true]
+  else [COND=buyer_errors is non-empty]
+    CC_VAL -> CC_VAL : buyer/reference validation failed\n[step=S3.2]\n[vals buyer_valid=false; buyer_errors=<collected_errors>]
+  end
+end
+
+@enduml

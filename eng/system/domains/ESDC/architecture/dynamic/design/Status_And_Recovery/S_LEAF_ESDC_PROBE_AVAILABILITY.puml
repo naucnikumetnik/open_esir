@@ -1,0 +1,98 @@
+@startuml
+title Probe E-SDC local availability — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "StatusAndOperatorRecoveryManager" as CC_SRM <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_SRM, EXT_SE #FFF8DC
+S_LEAF_ESDC_PROBE_AVAILABILITY
+parent_ref: S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER / GRP_STATUS_PROBE
+behavior_ref: B_ESDC_STATUS_PROBE_AVAILABILITY
+end note
+
+note over CC_SRM, CC_SEA
+  The probe verifies that the E-SDC local runtime is responsive,
+  the Secure Element is accessible, and fundamental preconditions
+  (certificate validity, time synchronization) are met.
+  Results are cached for the current readiness evaluation cycle.
+end note
+
+' ============================================================================
+' S1 — Ensure local runtime responsive
+' ============================================================================
+group S1 "GRP_PROBE_LOCAL_RUNTIME"
+  CC_SRM -> CC_SRM : verify internal runtime health (service loop, storage access)\n[step=S1.1]\n[vals runtime_ok=<bool>]
+
+  alt [COND=runtime_ok == false]
+    CC_SRM -> CC_SRM : mark local_unavailable\n[step=S1.2e]\n[vals availability=unavailable; reason=runtime_error]
+    note right: Early exit — remaining probes skipped
+  end
+end
+
+' ============================================================================
+' S2 — Probe SE accessibility
+' ============================================================================
+group S2 "GRP_PROBE_SE_ACCESS"
+  CC_SRM -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.probeSecureElement() -> Result[SeProbeResult]\n[step=S2.1]\n[connection use_port=P_SRM_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_SRM__SEA__SECURE_ELEMENT]
+  activate CC_SEA
+  CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.Attention()\n[step=S2.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+  activate EXT_SE
+  EXT_SE --> CC_SEA : [step=S2.2r]\n[vals reachable=<bool>]
+  deactivate EXT_SE
+  CC_SEA --> CC_SRM : [step=S2.1r]\n[vals se_reachable=<bool>; se_uid=<uid>]
+  deactivate CC_SEA
+
+  alt [COND=se_reachable == false]
+    CC_SRM -> CC_SRM : mark local_unavailable\n[step=S2.3e]\n[vals availability=unavailable; reason=smart_card_missing]
+  end
+end
+
+' ============================================================================
+' S3 — Check SE certificate validity window
+' ============================================================================
+group S3 "GRP_PROBE_CERTIFICATE"
+  CC_SRM -> CC_SRM : read SE certificate expiration from cached state\n[step=S3.1]\n[vals cert_valid_until=<datetime>]
+
+  alt [COND=certificate expired or near expiry]
+    CC_SRM -> CC_SRM : flag certificate_degraded\n[step=S3.2a]\n[vals cert_valid=false]
+  else [COND=certificate valid]
+    CC_SRM -> CC_SRM : certificate check passed\n[step=S3.2b]\n[vals cert_valid=true]
+  end
+end
+
+' ============================================================================
+' S4 — Check time synchronization
+' ============================================================================
+group S4 "GRP_PROBE_TIME_SYNC"
+  CC_SRM -> CC_SRM : compare sdcDateTime with local system clock\n[step=S4.1]\n[vals time_delta=<seconds>; threshold=<configured_max_drift>]
+
+  alt [COND=time_delta > threshold]
+    CC_SRM -> CC_SRM : flag time_desynchronized\n[step=S4.2a]\n[vals time_sync_ok=false]
+  else [COND=time_delta within threshold]
+    CC_SRM -> CC_SRM : time synchronization acceptable\n[step=S4.2b]\n[vals time_sync_ok=true]
+  end
+end
+
+' ============================================================================
+' S5 — Derive local readiness classification
+' ============================================================================
+group S5 "GRP_PROBE_CLASSIFY"
+  CC_SRM -> CC_SRM : derive availability from probe results\n[step=S5.1]\n[vals availability=<available|unavailable|degraded>; probe_summary=<flags>]
+end
+
+@enduml

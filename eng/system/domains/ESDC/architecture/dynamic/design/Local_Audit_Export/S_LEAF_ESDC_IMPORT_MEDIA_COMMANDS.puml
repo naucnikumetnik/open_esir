@@ -1,0 +1,88 @@
+@startuml
+title Import and execute media-delivered commands — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "RemovableMediaAdapter" as CC_RMA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  storage "Removable Media\n(SD Card / USB)" as EXT_MEDIA <<external>>
+end box
+
+note over CC_FACADE, EXT_MEDIA #FFF8DC
+S_LEAF_ESDC_IMPORT_MEDIA_COMMANDS
+parent_ref: S_CMP_ESDC_LOCAL_AUDIT_EXPORT_MASTER / GRP_LOCAL_EXPORT_IMPORT_COMMANDS
+behavior_ref: B_ESDC_LOCAL_AUDIT_EXPORT_IMPORT_COMMANDS
+end note
+
+note over CC_RMA
+  If a {UID}.commands file is present on media root, the adapter
+  reads, parses, and filters commands by active SE UID. Valid
+  commands are executed sequentially. Results are written back
+  to the media as {UID}.results to acknowledge processing.
+end note
+
+' ============================================================================
+' S1 — Check for command file presence
+' ============================================================================
+alt [COND=commands_file_present]
+
+  group S1 "GRP_IMPORT_READ_COMMANDS"
+    CC_FACADE -> CC_RMA : IF_CMP_ESDC_REMOVABLE_MEDIA.importMediaCommands(seUid:string) -> Result[MediaCommandResult]\n[step=S1.1]\n[connection use_port=P_FACADE_USE_REMOVABLE_MEDIA; prov_port=P_RMA_PROV_REMOVABLE_MEDIA; conn=C_FACADE__RMA__REMOVABLE_MEDIA]
+    activate CC_RMA
+    CC_RMA -> EXT_MEDIA : IF_DEP_REMOVABLE_MEDIA_IO.readFile(path:string) -> Result[bytes]\n[step=S1.2]\n[connection use_port=P_ESDC_USE_REMOVABLE_MEDIA_IO; prov_port=P_MEDIA_PROV_REMOVABLE_MEDIA_IO; conn=C_ESDC__MEDIA__REMOVABLE_MEDIA_IO]\n[vals path=<active_se_uid>.commands]
+    activate EXT_MEDIA
+    EXT_MEDIA --> CC_RMA : [step=S1.2r]\n[vals raw_content=<file_bytes>]
+    deactivate EXT_MEDIA
+    CC_RMA -> CC_RMA : parse command file and filter by active SE UID\n[step=S1.3]\n[vals total_commands=<n>; applicable_commands=<m>]
+  end
+
+  ' ==========================================================================
+  ' S2 — Execute applicable commands
+  ' ==========================================================================
+  group S2 "GRP_IMPORT_EXECUTE_COMMANDS"
+    loop [COND=for each applicable command]
+      CC_RMA -> CC_FACADE : IF_CMP_ESDC_FACADE.applyCommand(command:MediaCommand) -> Result[bool]\n[step=S2.1]\n[connection use_port=P_RMA_USE_FACADE; prov_port=P_FACADE_PROV_FACADE; conn=C_RMA__FACADE__FACADE]\n[vals commandId=<cmd.id>; command_type=<cmd.type>]
+      activate CC_FACADE
+      CC_FACADE -> CC_FACADE : apply command payload to local configuration\n[step=S2.2]
+
+      alt [COND=command applied successfully]
+        CC_FACADE --> CC_RMA : [step=S2.1a]\n[vals outcome=true]
+        deactivate CC_FACADE
+      else [COND=command application failed]
+        CC_FACADE --> CC_RMA : [step=S2.1e]\n[vals outcome=false; reason=<error_detail>]
+        deactivate CC_FACADE
+      end
+
+      CC_RMA -> CC_RMA : record command execution result\n[step=S2.3]\n[vals commandId=<cmd.id>; outcome=<true|false>]
+    end
+  end
+
+  ' ==========================================================================
+  ' S3 — Write results file back to media
+  ' ==========================================================================
+  group S3 "GRP_IMPORT_WRITE_RESULTS"
+    CC_RMA -> EXT_MEDIA : IF_DEP_REMOVABLE_MEDIA_IO.writeFile(path:string, content:bytes) -> Result[void]\n[step=S3.1]\n[connection use_port=P_ESDC_USE_REMOVABLE_MEDIA_IO; prov_port=P_MEDIA_PROV_REMOVABLE_MEDIA_IO; conn=C_ESDC__MEDIA__REMOVABLE_MEDIA_IO]\n[vals path=<active_se_uid>.results; content=<command_outcomes_json>]
+    activate EXT_MEDIA
+    EXT_MEDIA --> CC_RMA : [step=S3.1r]\n[vals written=true]
+    deactivate EXT_MEDIA
+    CC_RMA --> CC_FACADE : [step=S3.2]\n[vals result=MediaCommandResult(commands_processed=<m>; successes=<s>; failures=<f>)]
+    deactivate CC_RMA
+  end
+
+else [COND=no commands_file_present]
+  CC_FACADE -> CC_FACADE : continue directly to local audit export\n[step=S1.skip]\n[vals commands_imported=false]
+end
+
+@enduml

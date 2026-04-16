@@ -1,0 +1,92 @@
+@startuml
+title Ensure backend authentication context — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "CommandLifecycleCoordinator" as CC_CLC <<component>>
+  control "TaxCoreEsdcBackendAdapter" as CC_TBA <<component>>
+  control "PkiClientContextAdapter" as CC_PKI <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control "TaxCore Backend\n(E-SDC API)" as EXT_TCB <<external>>
+  entity "PKI Applet /\nClient Certificate" as EXT_PKI <<external>>
+end box
+
+note over CC_CLC, EXT_PKI #FFF8DC
+S_LEAF_ESDC_ENSURE_AUTH_CONTEXT
+parent_ref: S_CMP_ESDC_BACKEND_SYNC_MASTER / GRP_BACKEND_SYNC_ENSURE_AUTH
+behavior_ref: B_ESDC_BACKEND_SYNC_ENSURE_AUTH_CONTEXT
+end note
+
+note over CC_CLC, CC_TBA
+  Ensures a valid TaxCoreAuthenticationToken is available.
+  If cached token is still valid, reuses it.
+  If expired, acquires a new one using client certificate.
+end note
+
+' ============================================================================
+' S1 — Check cached token validity
+' ============================================================================
+group S1 "GRP_AUTH_CHECK_CACHED_TOKEN"
+  CC_CLC -> CC_CLC : check cached token validity\n[step=S1.1]\n[vals token_valid=<bool>; token_expires_at=<datetime>]
+
+  alt [COND=token_valid == true]
+    CC_CLC -> CC_CLC : reuse cached token\n[step=S1.2]\n[vals auth_context_ready=true]
+
+  else [COND=token_valid == false or no_token]
+
+    ' ========================================================================
+    ' S2 — Read client certificate
+    ' ========================================================================
+    group S2 "GRP_AUTH_READ_CLIENT_CERTIFICATE"
+      CC_CLC -> CC_PKI : IF_CMP_ESDC_PKI_CLIENT_CONTEXT.readClientCertificateContext() -> Result[ClientCertificateContext]\n[step=S2.1]\n[connection use_port=P_CLC_USE_PKI_CLIENT_CONTEXT; prov_port=P_PKI_PROV_PKI_CLIENT_CONTEXT; conn=C_CLC__PKI__PKI_CLIENT_CONTEXT]
+      activate CC_PKI
+      CC_PKI -> EXT_PKI : IF_DEP_PKI_CLIENT_CONTEXT.ReadCertificate() -> ClientCertificateContext\n[step=S2.2]\n[connection use_port=P_ESDC_USE_PKI_CLIENT_CONTEXT; prov_port=P_PKI_PROV_PKI_CLIENT_CONTEXT; conn=C_ESDC__PKI__PKI_CLIENT_CONTEXT]
+      EXT_PKI --> CC_PKI : [step=S2.2r]\n[vals result=ClientCertificateContext]
+      CC_PKI --> CC_CLC : [step=S2.1r]\n[vals certificate_context=<ClientCertificateContext>]
+      deactivate CC_PKI
+    end
+
+    ' ========================================================================
+    ' S3 — Request authentication token
+    ' ========================================================================
+    group S3 "GRP_AUTH_REQUEST_TOKEN"
+      CC_CLC -> CC_TBA : IF_CMP_ESDC_TAXCORE_ESDC_BACKEND.requestAuthenticationToken(certificate_context:ClientCertificateContext) -> Result[AuthenticationTokenResponse]\n[step=S3.1]\n[connection use_port=P_CLC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TBA_PROV_TAXCORE_ESDC_BACKEND; conn=C_CLC__TBA__TAXCORE_ESDC_BACKEND]
+      activate CC_TBA
+      CC_TBA -> EXT_TCB : IF_DEP_TAXCORE_ESDC_BACKEND.RequestAuthenticationToken() -> AuthenticationTokenResponse\n[step=S3.2]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-301 · HTTPS GET /api/v3/sdc/token · client certificate]
+      activate EXT_TCB
+
+      alt [COND=token_request_failed]
+        EXT_TCB --> CC_TBA : [step=S3.2e]\n[vals error=<http_error>]
+        deactivate EXT_TCB
+        CC_TBA --> CC_CLC : [step=S3.1e]\n[vals auth_context_ready=false; error=token_acquisition_failed]
+        deactivate CC_TBA
+
+      else [COND=token_request_succeeded]
+        EXT_TCB --> CC_TBA : [step=S3.2r]\n[vals result=AuthenticationTokenResponse(token, expiresAt)]
+        deactivate EXT_TCB
+        CC_TBA --> CC_CLC : [step=S3.1r]\n[vals token=<token>; expiresAt=<datetime>]
+        deactivate CC_TBA
+      end
+    end
+
+    ' ========================================================================
+    ' S4 — Cache token
+    ' ========================================================================
+    group S4 "GRP_AUTH_CACHE_TOKEN"
+      CC_CLC -> CC_CLC : cache token until expiresAt\n[step=S4.1]\n[vals auth_context_ready=true]
+    end
+
+  end
+end
+
+@enduml

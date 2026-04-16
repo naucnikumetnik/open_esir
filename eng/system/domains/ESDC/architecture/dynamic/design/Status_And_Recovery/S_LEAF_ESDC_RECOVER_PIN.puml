@@ -1,0 +1,95 @@
+@startuml
+title Recover PIN — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "StatusAndOperatorRecoveryManager" as CC_SRM <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_FACADE, EXT_SE #FFF8DC
+S_LEAF_ESDC_RECOVER_PIN
+parent_ref: S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER / GRP_STATUS_RECOVER_PIN
+behavior_ref: B_ESDC_STATUS_RECOVER_PIN
+end note
+
+note over CC_SRM, CC_SEA
+  Operator provides the PIN via EsdcFacade. The manager delegates
+  PIN verification to the SE through SecureElementAdapter. On success,
+  the SE session is unlocked and the PIN context is cached in volatile
+  state. On failure, the operator is notified of the specific condition.
+end note
+
+' ============================================================================
+' S1 — Receive PIN from operator via facade
+' ============================================================================
+group S1 "GRP_PIN_RECEIVE"
+  CC_FACADE -> CC_SRM : IF_CMP_ESDC_STATUS_AND_RECOVERY.verifyPin(pin:PinPlainText) -> Result[GeneralStatusCodeText]\n[step=S1.1]\n[connection use_port=P_FACADE_USE_STATUS_AND_RECOVERY; prov_port=P_SRM_PROV_STATUS_AND_RECOVERY; conn=C_FACADE__SRM__STATUS_AND_RECOVERY]
+  activate CC_SRM
+end
+
+' ============================================================================
+' S2 — Delegate PIN verification to SE
+' ============================================================================
+group S2 "GRP_PIN_VERIFY_SE"
+  CC_SRM -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.verifyPin(pin:PinPlainText) -> Result[PinVerifyResult]\n[step=S2.1]\n[connection use_port=P_SRM_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_SRM__SEA__SECURE_ELEMENT]
+  activate CC_SEA
+  CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.VerifyPinApdu(pin:PinPlainText)\n[step=S2.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+  activate EXT_SE
+
+  alt [COND=SW == 0x9000 (PIN accepted)]
+    EXT_SE --> CC_SEA : [step=S2.2r]\n[vals SW=0x9000; result=pin_ok]
+    deactivate EXT_SE
+    CC_SEA --> CC_SRM : [step=S2.1r]\n[vals pinResult=success]
+    deactivate CC_SEA
+
+    CC_SRM -> CC_SRM : unlock active SE session, cache PIN context in volatile state\n[step=S2.3a]\n[vals session_unlocked=true; isPinRequired=false]
+    CC_SRM --> CC_FACADE : [step=S2.4a]\n[vals result=GeneralStatusCodeText(ready)]
+    deactivate CC_SRM
+
+  else [COND=PIN incorrect (SW = 0x63Cx, retries remaining)]
+    EXT_SE --> CC_SEA : [step=S2.2e1]\n[vals SW=0x63Cx; retries_remaining=<n>]
+    deactivate EXT_SE
+    CC_SEA --> CC_SRM : [step=S2.1e1]\n[vals pinResult=pin_failed; retries=<n>]
+    deactivate CC_SEA
+
+    CC_SRM -> CC_SRM : mark pending operator action\n[step=S2.3e1]\n[vals isPinRequired=true]
+    CC_SRM --> CC_FACADE : [step=S2.4e1]\n[vals result=GeneralStatusCodeText(pin_failed; retries=<n>)]
+    deactivate CC_SRM
+
+  else [COND=SE locked (SW = 0x6983, no retries)]
+    EXT_SE --> CC_SEA : [step=S2.2e2]\n[vals SW=0x6983; result=se_locked]
+    deactivate EXT_SE
+    CC_SEA --> CC_SRM : [step=S2.1e2]\n[vals pinResult=se_locked]
+    deactivate CC_SEA
+
+    CC_SRM -> CC_SRM : mark SE permanently locked\n[step=S2.3e2]\n[vals se_locked=true]
+    CC_SRM --> CC_FACADE : [step=S2.4e2]\n[vals result=GeneralStatusCodeText(se_locked)]
+    deactivate CC_SRM
+
+  else [COND=smart card not present]
+    EXT_SE --> CC_SEA : [step=S2.2e3]\n[vals error=card_not_present]
+    deactivate EXT_SE
+    CC_SEA --> CC_SRM : [step=S2.1e3]\n[vals pinResult=smart_card_missing]
+    deactivate CC_SEA
+
+    CC_SRM --> CC_FACADE : [step=S2.4e3]\n[vals result=GeneralStatusCodeText(smart_card_missing)]
+    deactivate CC_SRM
+  end
+end
+
+@enduml

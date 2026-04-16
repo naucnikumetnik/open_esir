@@ -1,0 +1,454 @@
+artifact_kind: component_storage_subview
+schema_version: "0.1"
+
+card:
+  id: DV_CMP_ESDC_AUDIT_PROOF_STORAGE
+  name: E-SDC Audit and Proof Storage — component subview
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-subview
+  level: component
+  scope: >
+    Focused logical storage subview for the E-SDC audit evidence, proof lifecycle,
+    and the provisionally-owned export staging slice.
+  purpose: >
+    Refine the system storage matrix for ST_AUDIT_EVIDENCE_STATE,
+    ST_PROOF_LIFECYCLE_STATE, and ST_EXPORT_STAGING_STATE by making lifecycle
+    ownership, entity families, access patterns, retention/disposition invariants,
+    and the audit-vs-export boundary explicit for the selected E-SDC components.
+
+traceability:
+  source_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_sys_storage_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT
+    - SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+    - SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+    - SD_CMP_OPEN_FISCAL_CORE_STORAGE_OWNERSHIP
+    - SMX_CMP_OPEN_FISCAL_CORE_STORAGE_ACCESS
+
+source_policy:
+  primary_derivation_source: structural_view
+  supporting_storage_source:
+    - existing_sys_storage_slice_only
+  derivation_rules:
+    - Use structural component responsibilities as the primary source of ownership.
+    - Use existing SYS storage slice only to name the already-defined store and entity families.
+    - Do not introduce repository APIs, table design, file layout, or deployment bindings.
+    - Do not allocate new components not present in the structural source.
+
+focus:
+  primary_store_refs:
+    - ST_AUDIT_EVIDENCE_STATE
+    - ST_PROOF_LIFECYCLE_STATE
+  provisional_store_refs:
+    - ST_EXPORT_STAGING_STATE
+  focus_entities:
+    # Audit evidence
+    - E_LOCAL_JOURNAL_RECORD
+    - E_AUDIT_PACKAGE_RECORD
+    - E_AUDIT_BACKLOG_INDEX
+    # Proof lifecycle
+    - E_PROOF_CYCLE_RECORD
+    - E_AUDIT_REQUEST_PAYLOAD_RECORD
+    - E_PROOF_OF_AUDIT_REQUEST_RECORD
+    - E_PROOF_ARTIFACT_RECORD
+    # Export staging (provisional)
+    - E_EXPORT_BATCH_RECORD
+    - E_STAGED_MEDIA_ARTIFACT_RECORD
+    - E_EXPORT_RESULT_RECORD
+
+components_in_scope:
+  - component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    role: audit_proof_and_export_owner
+    structural_basis: >
+      Structural source explicitly gives this component audit package backlog
+      ownership, remote audit submission lifecycle, proof-of-audit lifecycle
+      ownership, and local export set ownership. No distinct export manager
+      exists in the structural source.
+    persistent_state_role: >
+      Canonical owner of audit evidence backlog evolution, proof cycle progression,
+      proof artifact retention, and export staging lifecycle.
+
+  - component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    role: evidence_append_source
+    structural_basis: >
+      Structural source gives this component synchronous local CreateInvoice
+      ownership and audit-trace handoff into backlog.
+    persistent_state_role: >
+      Support writer that appends fiscal evidence (local journal and initial audit
+      package) after successful local fiscalization. Does not own backlog evolution
+      or disposition.
+
+  - component_ref: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    role: evidence_reader_for_recovery
+    structural_basis: >
+      Derives readiness/status classification and may consult audit evidence and
+      proof lifecycle state for status derivation.
+    persistent_state_role: >
+      Read-only consumer of audit evidence and proof lifecycle state for recovery
+      and status classification purposes.
+
+  - component_ref: CC_ESDC_FACADE
+    role: coordinating_reader
+    structural_basis: >
+      Facade coordinates audit/proof and export entry flows.
+    persistent_state_role: >
+      Reads export staging state for coordination. Does not read audit/proof
+      stores directly per the structural source.
+
+  - component_ref: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_TAXCORE_ESDC_BACKEND for remote audit submission and
+      proof-of-audit protocol.
+    persistent_state_role: none
+
+  - component_ref: CC_ESDC_SECURE_ELEMENT_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_SECURE_ELEMENT for StartAuditApdu and AmountStatusApdu
+      interactions needed for proof composition.
+    persistent_state_role: none
+
+  - component_ref: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_REMOVABLE_MEDIA_IO for local audit export media transfer.
+    persistent_state_role: none
+
+logical_store_contracts:
+  - store_ref: ST_AUDIT_EVIDENCE_STATE
+    summary: local_journal + audit_package_backlog + backlog_index
+    owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    support_writer: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    readers:
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+
+  - store_ref: ST_PROOF_LIFECYCLE_STATE
+    summary: proof_cycle + audit_request_payload + proof_of_audit_request + proof_artifacts
+    owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    readers:
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+
+  - store_ref: ST_EXPORT_STAGING_STATE
+    summary: export_batch + staged_media_artifacts + export_results
+    owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    provisional_reason: >
+      No separate export manager exists in the structural source. Revisit if local
+      audit export becomes a distinct component at CMP level.
+    readers:
+      - CC_ESDC_FACADE
+
+entity_families:
+  # --- Audit evidence ---
+  - entity_ref: E_LOCAL_JOURNAL_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    append_source: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    meaning: >
+      Append-only local fiscal evidence record created after successful local
+      fiscalization. VerificationUrl is stored as part of evidence, not as a
+      runtime dependency. Reference-only enrichments for operator search are
+      non-normative.
+
+  - entity_ref: E_AUDIT_PACKAGE_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    append_source: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    meaning: >
+      Canonical audit package with key, iv, and payload preserved without local
+      aliasing or reshaping. Remains in local memory until Proof-of-Audit command.
+      Deletion allowed only on backend status 4. Retry only on status 1.
+
+  - entity_ref: E_AUDIT_BACKLOG_INDEX
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    meaning: >
+      Disposition and query index over audit packages for backlog management,
+      remote submission lifecycle, and compaction.
+
+  # --- Proof lifecycle ---
+  - entity_ref: E_PROOF_CYCLE_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    meaning: >
+      Tracks the current proof-of-audit cycle state including cycle identity,
+      progression phase, and closure status.
+
+  - entity_ref: E_AUDIT_REQUEST_PAYLOAD_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    meaning: >
+      Stored AuditRequestPayload submitted to backend. Explicitly distinct from
+      ProofOfAuditRequest storage per SR_SYS_013.
+
+  - entity_ref: E_PROOF_OF_AUDIT_REQUEST_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    meaning: >
+      Composed from StartAuditApdu output plus AmountStatusApdu output. Explicitly
+      distinct from AuditRequestPayload per SR_SYS_013.
+
+  - entity_ref: E_PROOF_ARTIFACT_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    meaning: >
+      Opaque proof payload at storage level. Not to be reinterpreted as public
+      JSON verification bodies per SR_SYS_014.
+
+  # --- Export staging (provisional) ---
+  - entity_ref: E_EXPORT_BATCH_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    meaning: >
+      Operator-triggered export batch capturing the scope and identity of an
+      export window.
+
+  - entity_ref: E_STAGED_MEDIA_ARTIFACT_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    meaning: >
+      Materialized media artifacts staged for removable-media transfer. Official
+      filename conventions apply per SR_SYS_019.
+
+  - entity_ref: E_EXPORT_RESULT_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    meaning: >
+      Export outcome record. Distinct from backend command state and from durable
+      audit backlog disposition per SR_SYS_020.
+
+access_patterns:
+  # --- Evidence creation ---
+  - id: AP_CMP_APPEND_FISCAL_EVIDENCE
+    owner_component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    reads:
+      - ST_SYSTEM_CONFIGURATION_STATE
+      - ST_COUNTER_STATE
+    writes:
+      - E_LOCAL_JOURNAL_RECORD
+      - E_AUDIT_PACKAGE_RECORD
+    trigger_family:
+      - local_fiscalization_success
+    notes: >
+      Local fiscalization engine appends evidence after successful CreateInvoice.
+      Ownership of the backlog evolution transfers to the lifecycle manager from
+      this point forward.
+
+  # --- Audit backlog management ---
+  - id: AP_CMP_EVOLVE_AUDIT_BACKLOG
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+    writes:
+      - E_AUDIT_BACKLOG_INDEX
+    trigger_family:
+      - backend_sync_audit_submission
+      - audit_disposition_resolution
+    notes: >
+      Manages backlog index evolution based on remote audit submission results.
+      Deletion only on status 4. Retry only on status 1.
+
+  - id: AP_CMP_SUBMIT_AUDIT_PACKAGE_REMOTE
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+    writes:
+      - E_AUDIT_BACKLOG_INDEX
+    trigger_family:
+      - backend_sync
+    notes: >
+      Reads pending packages, submits via backend adapter, records disposition.
+
+  # --- Proof cycle ---
+  - id: AP_CMP_START_PROOF_CYCLE
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_PROOF_CYCLE_RECORD
+    writes:
+      - E_PROOF_CYCLE_RECORD
+      - E_AUDIT_REQUEST_PAYLOAD_RECORD
+    trigger_family:
+      - proof_of_audit_command_received
+    notes: >
+      Initiates proof cycle and composes AuditRequestPayload from backlog state.
+
+  - id: AP_CMP_COMPOSE_PROOF_REQUEST
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_AUDIT_REQUEST_PAYLOAD_RECORD
+    writes:
+      - E_PROOF_OF_AUDIT_REQUEST_RECORD
+    trigger_family:
+      - proof_cycle_se_interaction_complete
+    notes: >
+      Composes ProofOfAuditRequest from StartAuditApdu + AmountStatusApdu outputs.
+      Kept explicitly distinct from AuditRequestPayload.
+
+  - id: AP_CMP_CLOSE_PROOF_CYCLE
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_PROOF_CYCLE_RECORD
+      - E_PROOF_OF_AUDIT_REQUEST_RECORD
+    writes:
+      - E_PROOF_CYCLE_RECORD
+      - E_PROOF_ARTIFACT_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+    trigger_family:
+      - proof_of_audit_backend_response_received
+    notes: >
+      Closes proof cycle, stores proof artifact, and updates audit backlog
+      disposition per proof-completion authority.
+
+  # --- Export staging ---
+  - id: AP_CMP_STAGE_EXPORT_BATCH
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_AUDIT_PACKAGE_RECORD
+      - E_AUDIT_BACKLOG_INDEX
+    writes:
+      - E_EXPORT_BATCH_RECORD
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+    trigger_family:
+      - operator_export_request
+    notes: >
+      Stages audit packages and auxiliary artifacts for removable-media transfer.
+      Export staging is logically separate from durable audit backlog.
+
+  - id: AP_CMP_CLOSE_EXPORT_WINDOW
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_EXPORT_BATCH_RECORD
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+    writes:
+      - E_EXPORT_RESULT_RECORD
+      - E_EXPORT_BATCH_RECORD
+    trigger_family:
+      - media_transfer_outcome
+    notes: >
+      Records export outcome and closes export window. Export success alone does
+      not authorize audit package deletion per SR_SYS_012.
+
+  # --- Recovery reads ---
+  - id: AP_CMP_READ_AUDIT_PROOF_FOR_RECOVERY
+    owner_component_ref: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    reads:
+      - E_AUDIT_BACKLOG_INDEX
+      - E_PROOF_CYCLE_RECORD
+    writes: []
+    trigger_family:
+      - get_status
+      - check_ready
+    notes: >
+      Recovery manager reads audit/proof state for status derivation only.
+
+ownership_rules:
+  - id: APS_001
+    statement: >
+      Audit package backlog ownership, backlog disposition, and compaction belong to
+      CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER. Local fiscalization engine is a
+      support writer for initial append only.
+  - id: APS_002
+    statement: >
+      Proof cycle, proof request composition, and proof artifact retention belong
+      exclusively to CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER.
+  - id: APS_003
+    statement: >
+      Export staging ownership is provisionally assigned to
+      CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER. Revisit if a dedicated export
+      manager emerges at CMP level.
+  - id: APS_004
+    statement: >
+      CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER reads audit/proof state for
+      status classification but does not write or disposition audit/proof entities.
+  - id: APS_005
+    statement: >
+      Adapters do not own canonical audit, proof, or export entities. They realize
+      transport protocols only.
+
+invariants:
+  - id: INV_APS_001
+    statement: >
+      Audit packages remain in local memory until a Proof-of-Audit command is
+      received. Local export or media transfer success alone is not sufficient
+      authorization for package deletion.
+    sys_rule_ref: SR_SYS_012
+  - id: INV_APS_002
+    statement: >
+      Deletion of audit package state is allowed only on backend status 4.
+    sys_rule_ref: SR_SYS_010
+  - id: INV_APS_003
+    statement: >
+      Retry of audit package processing is allowed only on backend status 1.
+    sys_rule_ref: SR_SYS_011
+  - id: INV_APS_004
+    statement: >
+      AuditRequestPayload and ProofOfAuditRequest must remain explicitly distinct
+      storage entities.
+    sys_rule_ref: SR_SYS_013
+  - id: INV_APS_005
+    statement: >
+      Proof artifacts remain opaque proof payloads and are not reinterpreted as
+      public verification bodies.
+    sys_rule_ref: SR_SYS_014
+  - id: INV_APS_006
+    statement: >
+      E_LOCAL_JOURNAL_RECORD is append-only after fiscalization and may be pruned
+      only through explicit policy-driven compaction.
+    sys_rule_ref: SR_SYS_007
+  - id: INV_APS_007
+    statement: >
+      AuditPackage payload shape (key, iv, payload) must be preserved canonical
+      without local aliasing or semantic reshaping.
+    sys_rule_ref: SR_SYS_008
+  - id: INV_APS_008
+    statement: >
+      Export staging is logically separate from durable audit backlog. Export
+      records may be pruned after export window closure but not in a way that
+      silently deletes retained audit evidence.
+    sys_rule_ref: SR_SYS_018
+  - id: INV_APS_009
+    statement: >
+      E_EXPORT_RESULT_RECORD must remain distinct from backend command state and
+      distinct from durable audit backlog disposition.
+    sys_rule_ref: SR_SYS_020
+
+forbidden_couplings:
+  - id: FBD_APS_001
+    statement: >
+      Do not let export success trigger automatic audit backlog deletion. The
+      proof-of-audit lifecycle is the only authorized deletion authority.
+  - id: FBD_APS_002
+    statement: >
+      Do not merge AuditRequestPayload and ProofOfAuditRequest into a single
+      undifferentiated record.
+  - id: FBD_APS_003
+    statement: >
+      Do not let adapter transport shapes define canonical audit/proof storage
+      structure.
+  - id: FBD_APS_004
+    statement: >
+      Do not collapse export staging state into the audit evidence store. They are
+      logically separate even though the same component currently owns both.
+  - id: FBD_APS_005
+    statement: >
+      Do not let journal enrichments (operator search, support fields) redefine
+      fiscal-core correctness of E_LOCAL_JOURNAL_RECORD.
+
+refinement_targets:
+  next_dynamic_views:
+    - S_CMP_ESDC_AUDIT_AND_PROOF_LIFECYCLE
+    - S_CMP_ESDC_LOCAL_EXPORT
+  next_unit_focus:
+    - audit backlog persistence port
+    - proof cycle persistence port
+    - export staging persistence port
+    - audit package disposition transaction boundary
+    - proof cycle closure transaction boundary
+    - export window closure transaction boundary
+
+analysis_notes:
+  - This subview covers 3 logical stores (2 primary + 1 provisional) because the
+    structural source assigns all three to the same component.
+  - The audit-vs-export boundary is the most important invariant here. Export staging
+    is an operator-driven window, not a canonical audit lifecycle milestone.
+  - If a dedicated export manager emerges later, the export staging section of this
+    subview should split into DV_CMP_ESDC_LOCAL_EXPORT_STORAGE.
+  - The handoff from local fiscalization engine (append) to audit/proof lifecycle
+    manager (backlog evolution) is the key CMP-level ownership transition.

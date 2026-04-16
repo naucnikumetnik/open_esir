@@ -1,0 +1,268 @@
+artifact_kind: component_storage_subview
+schema_version: "0.1"
+
+card:
+  id: DV_CMP_ESDC_LOCAL_EXPORT_STORAGE
+  name: E-SDC Local Export — component storage subview
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-subview
+  level: component
+  scope: >
+    Focused logical storage subview for the local audit export flow, formalizing
+    ST_EXPORT_STAGING_STATE placement, media artifact staging, and the boundary
+    between export staging and the canonical audit backlog.
+  purpose: >
+    Document the export staging slice separately to make the audit-vs-export
+    boundary and the media-related invariants explicit. This subview overlaps
+    intentionally with DV_CMP_ESDC_AUDIT_PROOF_STORAGE for the provisional
+    export staging entities. It exists as a distinct artifact because the export
+    flow has unique media-related constraints and a distinct operator-triggered
+    lifecycle.
+
+traceability:
+  source_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_sys_storage_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF
+    - SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+    - SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+    - SD_CMP_OPEN_FISCAL_CORE_STORAGE_OWNERSHIP
+    - SMX_CMP_OPEN_FISCAL_CORE_STORAGE_ACCESS
+  sister_subview_ref: DV_CMP_ESDC_AUDIT_PROOF_STORAGE
+
+source_policy:
+  primary_derivation_source: structural_view
+  supporting_storage_source:
+    - existing_sys_storage_slice_only
+  derivation_rules:
+    - Use structural component responsibilities as the primary source of ownership.
+    - Use existing SYS storage slice only to name the already-defined store and entity families.
+    - Do not introduce repository APIs, table design, file layout, or deployment bindings.
+    - Do not allocate new components not present in the structural source.
+
+focus:
+  primary_store_refs:
+    - ST_EXPORT_STAGING_STATE
+  read_dependency_store_refs:
+    - ST_AUDIT_EVIDENCE_STATE
+    - ST_SYSTEM_CONFIGURATION_STATE
+  focus_entities:
+    - E_EXPORT_BATCH_RECORD
+    - E_STAGED_MEDIA_ARTIFACT_RECORD
+    - E_EXPORT_RESULT_RECORD
+
+components_in_scope:
+  - component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    role: export_staging_owner
+    structural_basis: >
+      Structural source assigns local export set ownership to this component.
+      No distinct export manager exists at CMP level.
+    persistent_state_role: >
+      Provisional owner of ST_EXPORT_STAGING_STATE. Reads audit evidence and
+      configuration for export window scoping and media artifact materialization.
+
+  - component_ref: CC_ESDC_FACADE
+    role: coordinator_and_export_reader
+    structural_basis: >
+      Facade coordinates operator-triggered export entry flow. Reads export
+      staging state for coordination and response construction.
+    persistent_state_role: >
+      Read-only consumer of export staging state for coordination.
+
+  - component_ref: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_REMOVABLE_MEDIA_IO for local audit export media transfer.
+    persistent_state_role: none
+
+logical_store_contracts:
+  - store_ref: ST_EXPORT_STAGING_STATE
+    summary: export_batch + staged_media_artifacts + export_results
+    owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    provisional_reason: >
+      No separate export manager exists in the structural source. Revisit if local
+      audit export becomes a distinct component at CMP level.
+    readers:
+      - CC_ESDC_FACADE
+
+entity_families:
+  - entity_ref: E_EXPORT_BATCH_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    meaning: >
+      Operator-triggered export batch capturing the scope (date range, invoice
+      range, or full-backlog) and identity of an export window. An export batch
+      is not a canonical audit lifecycle milestone — it is an operator convenience
+      snapshot over the backlog.
+
+  - entity_ref: E_STAGED_MEDIA_ARTIFACT_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    meaning: >
+      Materialized media artifacts staged for removable-media transfer. Official
+      filename conventions apply per SR_SYS_019. This is the last canonical entity
+      before the media adapter boundary. Once staged, the adapter transfers the
+      artifact without reshaping.
+
+  - entity_ref: E_EXPORT_RESULT_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    provisional: true
+    meaning: >
+      Export outcome record capturing transfer success, partial failure, or
+      operator cancellation. Distinct from backend command state and from durable
+      audit backlog disposition per SR_SYS_020. Export results may be pruned after
+      export window closure without affecting the audit backlog.
+
+access_patterns:
+  - id: AP_CMP_OPEN_EXPORT_WINDOW
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_AUDIT_PACKAGE_RECORD   # from ST_AUDIT_EVIDENCE_STATE
+      - E_AUDIT_BACKLOG_INDEX    # from ST_AUDIT_EVIDENCE_STATE
+      - E_DEVICE_IDENTITY_RECORD # from ST_SYSTEM_CONFIGURATION_STATE
+    writes:
+      - E_EXPORT_BATCH_RECORD
+    trigger_family:
+      - operator_export_request
+    notes: >
+      Opens an export window by scoping the audit backlog subset for export.
+      Reads audit evidence to determine exportable packages and reads device
+      identity for media artifact filename construction.
+
+  - id: AP_CMP_MATERIALIZE_MEDIA_ARTIFACTS
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_EXPORT_BATCH_RECORD
+      - E_AUDIT_PACKAGE_RECORD   # from ST_AUDIT_EVIDENCE_STATE
+    writes:
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+    trigger_family:
+      - export_window_open
+    notes: >
+      Materializes media artifacts from the scoped audit packages with official
+      filename conventions. This is the export staging canonical format, not a
+      direct serialization of audit package state.
+
+  - id: AP_CMP_TRANSFER_TO_MEDIA
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_STAGED_MEDIA_ARTIFACT_RECORD
+    writes: []
+    trigger_family:
+      - media_artifacts_staged
+    notes: >
+      Reads staged artifacts and transfers via removable media adapter. The
+      adapter transfer is stateless from the storage perspective — the export
+      result is determined after the adapter completes.
+
+  - id: AP_CMP_RECORD_EXPORT_RESULT
+    owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reads:
+      - E_EXPORT_BATCH_RECORD
+    writes:
+      - E_EXPORT_RESULT_RECORD
+      - E_EXPORT_BATCH_RECORD
+    trigger_family:
+      - media_transfer_outcome
+    notes: >
+      Records export outcome and marks the export batch as closed. Export success
+      alone does NOT authorize audit package deletion.
+
+  - id: AP_CMP_READ_EXPORT_STATUS
+    owner_component_ref: CC_ESDC_FACADE
+    reads:
+      - E_EXPORT_BATCH_RECORD
+      - E_EXPORT_RESULT_RECORD
+    writes: []
+    trigger_family:
+      - get_export_status
+    notes: >
+      Facade reads export staging state for operator-facing status responses.
+
+ownership_rules:
+  - id: EXS_001
+    statement: >
+      Export staging ownership is provisionally assigned to
+      CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER. The same component owns the
+      source audit backlog, which simplifies export window scoping but creates
+      a single-component coupling that should be monitored.
+  - id: EXS_002
+    statement: >
+      The removable media adapter does not own or persist export entities. It
+      realizes media transfer protocol only.
+  - id: EXS_003
+    statement: >
+      Facade reads export state for coordination only and does not own export
+      lifecycle transitions.
+
+invariants:
+  - id: INV_EXS_001
+    statement: >
+      Export staging is NOT the canonical audit backlog. ST_EXPORT_STAGING_STATE
+      is logically separate from ST_AUDIT_EVIDENCE_STATE even though the same
+      component owns both.
+    sys_rule_ref: SR_SYS_018
+  - id: INV_EXS_002
+    statement: >
+      Media artifact filenames must follow official filename conventions.
+    sys_rule_ref: SR_SYS_019
+  - id: INV_EXS_003
+    statement: >
+      E_EXPORT_RESULT_RECORD must remain distinct from backend command state and
+      distinct from durable audit backlog disposition.
+    sys_rule_ref: SR_SYS_020
+  - id: INV_EXS_004
+    statement: >
+      Export success alone is NOT authorization for audit package deletion. The
+      proof-of-audit lifecycle is the only authorized deletion authority.
+    sys_rule_ref: SR_SYS_012
+  - id: INV_EXS_005
+    statement: >
+      Export batch scope is a snapshot. If new audit packages arrive after an
+      export window is opened, they are NOT retroactively included in the open
+      batch.
+
+forbidden_couplings:
+  - id: FBD_EXS_001
+    statement: >
+      Do not let export success trigger automatic audit backlog deletion or
+      compaction. These are separate lifecycle authorities.
+  - id: FBD_EXS_002
+    statement: >
+      Do not let the removable media adapter's transport format define or
+      constrain the canonical E_STAGED_MEDIA_ARTIFACT_RECORD shape.
+  - id: FBD_EXS_003
+    statement: >
+      Do not collapse export staging state into audit evidence state. They must
+      remain separate even though the same component owns both.
+  - id: FBD_EXS_004
+    statement: >
+      Do not let export window scoping depend on proof-of-audit cycle state.
+      Export is an operator convenience, not a proof lifecycle milestone.
+
+refinement_targets:
+  next_dynamic_views:
+    - S_CMP_ESDC_LOCAL_EXPORT
+  next_unit_focus:
+    - export staging persistence port
+    - media artifact materialization unit
+    - export window closure transaction boundary
+    - filename convention enforcement
+    - removable media adapter invocation boundary
+
+analysis_notes:
+  - This subview intentionally overlaps with DV_CMP_ESDC_AUDIT_PROOF_STORAGE for
+    the export staging entities. The duplication is justified because the export flow
+    has unique media-related constraints and a distinct triggering model (operator
+    request vs. backend sync).
+  - If a dedicated CC_ESDC_LOCAL_EXPORT_MANAGER emerges at CMP level, the audit/proof
+    subview should drop its export staging section and this subview should become the
+    sole export storage authority.
+  - The key design tension is that the same component owns both audit backlog and
+    export staging. This is structurally sound but creates a risk of accidental
+    coupling between export lifecycle and audit lifecycle. The forbidden couplings
+    and invariants here are specifically aimed at preventing that.
+  - Export staging may use lighter-weight persistence than audit evidence since export
+    state is ephemeral (operator window) while audit evidence is durable
+    (proof-of-audit lifecycle).

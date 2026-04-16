@@ -1,0 +1,64 @@
+@startuml
+title Determine and stage export set — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+end box
+
+note over CC_FACADE, CC_APLM #FFF8DC
+S_LEAF_ESDC_DETERMINE_AND_STAGE_EXPORT_SET
+parent_ref: S_CMP_ESDC_LOCAL_AUDIT_EXPORT_MASTER / GRP_LOCAL_EXPORT_DETERMINE_SET
+behavior_ref: B_ESDC_LOCAL_AUDIT_EXPORT_DETERMINE_SET, B_ESDC_LOCAL_AUDIT_EXPORT_STAGE
+end note
+
+note over CC_APLM
+  AuditAndProofLifecycleManager enumerates the pending local
+  AuditPackage backlog, groups by SE UID, and filters by the
+  current target environment. The resulting export set defines
+  which packages and optional ARP file should be written to media.
+end note
+
+' ============================================================================
+' S1 — Enumerate pending audit backlog
+' ============================================================================
+group S1 "GRP_ENUMERATE_BACKLOG"
+  CC_FACADE -> CC_APLM : determineExportSet(seUid:string, environment:string) -> ExportSetResult\n[step=S1.1]
+  activate CC_APLM
+  CC_APLM -> CC_APLM : enumerate pending local AuditPackage backlog\n[step=S1.2]\n[vals total_pending=<n>]
+end
+
+' ============================================================================
+' S2 — Group and filter
+' ============================================================================
+group S2 "GRP_GROUP_AND_FILTER"
+  CC_APLM -> CC_APLM : group backlog by active Secure Element UID\n[step=S2.1]\n[vals packages_for_uid=<m>]
+  CC_APLM -> CC_APLM : filter packages by current target environment\n[step=S2.2]\n[vals packages_after_filter=<k>; environment=<target_env>]
+end
+
+' ============================================================================
+' S3 — Determine staging parameters
+' ============================================================================
+group S3 "GRP_STAGE_EXPORT"
+  alt [COND=packages_after_filter > 0]
+    CC_APLM -> CC_APLM : prepare export manifest\n[step=S3.1a]\n[vals export_count=<k>; folder_path={UID}/; arp_required=<bool>]
+    CC_APLM --> CC_FACADE : [step=S3.2a]\n[vals result=ExportSetResult(pending=true; count=<k>; arp_required=<bool>)]
+    deactivate CC_APLM
+
+  else [COND=packages_after_filter == 0]
+    CC_APLM --> CC_FACADE : [step=S3.1e]\n[vals result=ExportSetResult(pending=false; count=0)]
+    deactivate CC_APLM
+  end
+end
+
+@enduml

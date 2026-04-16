@@ -1,0 +1,285 @@
+artifact_kind: component_storage_ownership_view
+schema_version: "0.1"
+
+card:
+  id: SD_CMP_OPEN_FISCAL_CORE_STORAGE_OWNERSHIP
+  name: Open Fiscal Core — Component Storage Ownership
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-ownership
+  level: component
+  scope: >
+    Logical ownership and access responsibilities of candidate component-level
+    elements over already-defined system-level logical runtime stores.
+  purpose: >
+    Refine SYS storage semantics into CMP-level read/write/append/stage ownership
+    without committing to repository APIs, database schema, file layout, or
+    deployment-specific storage bindings.
+
+traceability:
+  source_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_sys_storage_refs:
+    - SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+    - SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+
+source_policy:
+  primary_source: structural_view_only
+  derivation_rules:
+    - Use only candidate component responsibilities, statefulness, and boundary rules present in SV_SYS_OPEN_FISCAL_CORE.
+    - Do not infer deployment-specific ownership from deployment views here.
+    - Do not infer repository or persistence implementation structure here.
+    - If the structural source does not show a dedicated persistent-state owner, assign no direct persistent ownership unless one component is the only coherent owner candidate.
+
+store_refs:
+  - ST_SYSTEM_CONFIGURATION_STATE
+  - ST_COUNTER_STATE
+  - ST_AUDIT_EVIDENCE_STATE
+  - ST_PROOF_LIFECYCLE_STATE
+  - ST_COMMAND_RECOVERY_STATE
+  - ST_EXPORT_STAGING_STATE
+
+access_modes:
+  - read
+  - create
+  - update
+  - append
+  - compact
+  - stage
+  - none
+
+authority_roles:
+  - owner_writer
+  - support_writer
+  - read_only_consumer
+  - transient_only
+  - no_persistent_access
+
+component_storage_ownership:
+  # ESIR side
+
+  - component_ref: CC_ESIR_FACADE
+    persistent_state_policy: no_direct_persistent_ownership
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source defines ESIR as business-facing orchestration and explicitly
+      denies ownership over backend/audit persistent state.
+
+  - component_ref: CC_ESIR_INVOICE_REQUEST_VALIDATION
+    persistent_state_policy: transient_request_only
+    store_access: []
+    authority_role: transient_only
+    rationale: >
+      Structural source describes pure request validation/preparation before delegation,
+      with no persistent ownership semantics.
+
+  - component_ref: CC_ESIR_FISCALIZATION_ROUTE_SELECTOR
+    persistent_state_policy: transient_request_only
+    store_access: []
+    authority_role: transient_only
+    rationale: >
+      Structural source describes routing policy logic, not durable state ownership.
+
+  - component_ref: CC_ESIR_TAXCORE_VSDC_ADAPTER
+    persistent_state_policy: transport_only
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source models this as an external adapter for online invoice calls,
+      not as a canonical storage owner.
+
+  # E-SDC coordination layer
+
+  - component_ref: CC_ESDC_FACADE
+    persistent_state_policy: coordinating_reader
+    store_access:
+      - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+        access_modes: [read]
+        authority_role: read_only_consumer
+        rationale: >
+          Facade coordinates bootstrap and local runtime entry flows and therefore
+          may consult current configuration and environment binding state.
+      - store_ref: ST_COMMAND_RECOVERY_STATE
+        access_modes: [read]
+        authority_role: read_only_consumer
+        rationale: >
+          Facade coordinates readiness, status, and recovery entry flows and may
+          consult current recovery snapshot and command-related state.
+      - store_ref: ST_EXPORT_STAGING_STATE
+        access_modes: [read]
+        authority_role: read_only_consumer
+        rationale: >
+          Facade coordinates export entry flows but is not the canonical export-state owner.
+    authority_role: read_only_consumer
+    rationale: >
+      Structural source presents facade as coordinator, not as the canonical owner
+      of persistent state mutations.
+
+  # E-SDC domain owners
+
+  - component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    persistent_state_policy: local_fiscal_state_owner
+    store_access:
+      - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+        access_modes: [read]
+        authority_role: read_only_consumer
+        rationale: >
+          Local fiscalization needs current environment/configuration inputs.
+      - store_ref: ST_COUNTER_STATE
+        access_modes: [read, update]
+        authority_role: owner_writer
+        rationale: >
+          Structural source gives this component the synchronous local CreateInvoice
+          ownership and no separate counter manager exists in the structural source.
+      - store_ref: ST_AUDIT_EVIDENCE_STATE
+        access_modes: [append]
+        authority_role: support_writer
+        rationale: >
+          Structural source explicitly says this component hands audit trace into
+          backlog ownership flow after local fiscalization.
+    authority_role: owner_writer
+    rationale: >
+      This is the strongest coherent structural owner for counter continuity and
+      creation-time evidence append in the current source.
+
+  - component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    persistent_state_policy: command_state_owner
+    store_access:
+      - store_ref: ST_COMMAND_RECOVERY_STATE
+        access_modes: [create, read, update, compact]
+        authority_role: owner_writer
+        rationale: >
+          Structural source explicitly gives this component command intake,
+          classification, application, acknowledgement, and unified lifecycle ownership.
+      - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+        access_modes: [read, update]
+        authority_role: support_writer
+        rationale: >
+          Structural source ties this component to bootstrap, backend sync, and
+          initialization-command flows, so config-affecting command application is a
+          coherent support-write responsibility.
+    authority_role: owner_writer
+    rationale: >
+      This is the direct structural owner of command persistence and command-state evolution.
+
+  - component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    persistent_state_policy: audit_proof_owner
+    store_access:
+      - store_ref: ST_AUDIT_EVIDENCE_STATE
+        access_modes: [create, read, update, append, compact]
+        authority_role: owner_writer
+        rationale: >
+          Structural source explicitly gives this component audit package backlog
+          ownership and remote audit submission lifecycle.
+      - store_ref: ST_PROOF_LIFECYCLE_STATE
+        access_modes: [create, read, update, compact]
+        authority_role: owner_writer
+        rationale: >
+          Structural source explicitly gives this component proof-of-audit lifecycle ownership.
+      - store_ref: ST_EXPORT_STAGING_STATE
+        access_modes: [create, read, update, stage, compact]
+        authority_role: owner_writer
+        rationale: >
+          Structural source includes local export set ownership here and no distinct
+          export manager exists in the structural source.
+    authority_role: owner_writer
+    rationale: >
+      This is the structural owner of retained audit/proof state and, for now,
+      the least-bad structural owner of export staging state.
+
+  - component_ref: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    persistent_state_policy: readiness_recovery_owner
+    store_access:
+      - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+        access_modes: [read]
+        authority_role: read_only_consumer
+        rationale: >
+          Recovery classification may depend on current environment/configuration context.
+      - store_ref: ST_COMMAND_RECOVERY_STATE
+        access_modes: [create, read, update]
+        authority_role: owner_writer
+        rationale: >
+          Structural source explicitly gives this component readiness/status derivation,
+          PIN/operator recovery, and environment refresh coordination; the natural
+          persistent target is the recovery snapshot and related recovery state.
+    authority_role: owner_writer
+    rationale: >
+      This is the direct structural owner of readiness/recovery snapshot semantics.
+
+  # Adapters
+
+  - component_ref: CC_ESDC_SECURE_ELEMENT_ADAPTER
+    persistent_state_policy: transport_only
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source models this as APDU adapter logic, not canonical persistent storage owner.
+
+  - component_ref: CC_ESDC_TAXCORE_SHARED_ADAPTER
+    persistent_state_policy: transport_only
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source models this as shared TaxCore adapter logic, not canonical persistent storage owner.
+
+  - component_ref: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+    persistent_state_policy: transport_only
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source models this as backend protocol adapter logic, not canonical persistent storage owner.
+
+  - component_ref: CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+    persistent_state_policy: transport_only
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source models this as PKI/certificate context adapter access only.
+
+  - component_ref: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+    persistent_state_policy: transport_only
+    store_access: []
+    authority_role: no_persistent_access
+    rationale: >
+      Structural source models this as removable-media I/O adapter, while export-state
+      ownership remains in the audit/proof lifecycle manager.
+
+component_level_constraints:
+  - id: CSC_001
+    statement: >
+      No ESIR candidate component receives direct ownership over persistent fiscal,
+      audit, proof, command, recovery, or export state.
+    rationale: >
+      Structural source explicitly states that shared persistent state is allowed only
+      behind the E-SDC boundary and that ESIR does not own backend/audit state.
+
+  - id: CSC_002
+    statement: >
+      Adapter components do not own canonical runtime stores.
+    rationale: >
+      Structural source models adapters as dependency realization seams, not as
+      persistent-state owners.
+
+  - id: CSC_003
+    statement: >
+      Where the structural source does not define a dedicated counter or export
+      manager, ownership remains with the nearest coherent lifecycle owner.
+    rationale: >
+      Prevents premature decomposition not yet justified by the structural source.
+
+open_allocations:
+  - subject: ST_COUNTER_STATE
+    current_owner_component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    reason: >
+      No separate counter manager exists in the structural source. Revisit after
+      component-level sequence and unit decomposition.
+
+  - subject: ST_EXPORT_STAGING_STATE
+    current_owner_component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    reason: >
+      No separate export manager exists in the structural source. Revisit if local
+      audit export becomes a distinct component at CMP level.
+
+analysis_notes:
+  - This artifact intentionally allocates ownership only where the structural source makes one component the coherent lifecycle owner.
+  - It is normal that most ESIR candidate components end up with no persistent-store ownership in this draft.
+  - The next refinement step should be component-level dynamic views for E-SDC subdomains, especially local fiscalization, command lifecycle, audit/proof, and local export.

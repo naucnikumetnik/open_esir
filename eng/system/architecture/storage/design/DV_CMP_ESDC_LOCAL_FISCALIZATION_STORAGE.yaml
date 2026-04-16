@@ -1,0 +1,296 @@
+artifact_kind: component_storage_subview
+schema_version: "0.1"
+
+card:
+  id: DV_CMP_ESDC_LOCAL_FISCALIZATION_STORAGE
+  name: E-SDC Local Fiscalization Engine — component storage subview
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-subview
+  level: component
+  scope: >
+    Focused logical storage subview for the E-SDC Local Fiscalization Engine's
+    primary counter state, configuration reads, and evidence-append handoff.
+  purpose: >
+    Refine the system storage matrix for the components and stores involved in
+    local fiscalization, making counter state ownership, configuration-read
+    dependency, and the evidence-append handoff boundary explicit.
+
+traceability:
+  source_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_sys_storage_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_CONFIG_AND_COUNTERS
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF
+    - SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+    - SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+    - SD_CMP_OPEN_FISCAL_CORE_STORAGE_OWNERSHIP
+    - SMX_CMP_OPEN_FISCAL_CORE_STORAGE_ACCESS
+
+source_policy:
+  primary_derivation_source: structural_view
+  supporting_storage_source:
+    - existing_sys_storage_slice_only
+  derivation_rules:
+    - Use structural component responsibilities as the primary source of ownership.
+    - Use existing SYS storage slice only to name the already-defined store and entity families.
+    - Do not introduce repository APIs, table design, file layout, or deployment bindings.
+    - Do not allocate new components not present in the structural source.
+
+focus:
+  primary_store_refs:
+    - ST_COUNTER_STATE
+  read_dependency_store_refs:
+    - ST_SYSTEM_CONFIGURATION_STATE
+  append_target_store_refs:
+    - ST_AUDIT_EVIDENCE_STATE
+  focus_entities:
+    # Counter state
+    - E_INVOICE_COUNTER_STATE
+    - E_TRANSACTION_COUNTER_STATE
+    # Configuration (read-only)
+    - E_DEVICE_IDENTITY_RECORD
+    - E_TAX_RATES_SNAPSHOT
+    - E_OPERATIONAL_PARAMETERS_RECORD
+    # Evidence append (handoff)
+    - E_LOCAL_JOURNAL_RECORD
+    - E_AUDIT_PACKAGE_RECORD
+
+components_in_scope:
+  - component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    role: counter_owner_and_evidence_appender
+    structural_basis: >
+      Structural source gives this component synchronous local CreateInvoice
+      ownership, counter maintenance, signing orchestration, and audit-trace
+      handoff into backlog.
+    persistent_state_role: >
+      Provisional owner of ST_COUNTER_STATE (invoice and transaction counters).
+      Read-only consumer of ST_SYSTEM_CONFIGURATION_STATE. Support-writer that
+      appends evidence (journal + audit package) to ST_AUDIT_EVIDENCE_STATE.
+
+  - component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    role: evidence_receiver
+    structural_basis: >
+      Canonical owner of ST_AUDIT_EVIDENCE_STATE. Receives appended evidence
+      from local fiscalization engine.
+    persistent_state_role: >
+      Owner of the audit evidence store that the fiscalization engine appends to.
+
+  - component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    role: configuration_owner
+    structural_basis: >
+      Canonical owner of ST_SYSTEM_CONFIGURATION_STATE including device identity,
+      tax rates, and operational parameters.
+    persistent_state_role: >
+      Owner of the configuration store that the fiscalization engine reads from.
+
+  - component_ref: CC_ESDC_FACADE
+    role: coordinator
+    structural_basis: >
+      Facade coordinates CreateInvoice entry flow and dispatches to the local
+      fiscalization engine.
+    persistent_state_role: none
+
+  - component_ref: CC_ESDC_SECURE_ELEMENT_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_SECURE_ELEMENT for signing operations required during
+      local fiscalization.
+    persistent_state_role: none
+
+logical_store_contracts:
+  - store_ref: ST_COUNTER_STATE
+    summary: invoice_counter + transaction_counter
+    owner: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    provisional: true
+    provisional_reason: >
+      Structural source assigns counter maintenance to local fiscalization engine
+      but this is the only component that touches counters. Revisit if counter
+      state becomes shared across multiple components.
+    readers: []
+
+  - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+    summary: device_identity + tax_rates + operational_parameters
+    owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    readers:
+      - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+
+  - store_ref: ST_AUDIT_EVIDENCE_STATE
+    summary: local_journal + audit_packages (append target only)
+    owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    support_writer: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+
+entity_families:
+  # --- Counter state ---
+  - entity_ref: E_INVOICE_COUNTER_STATE
+    semantic_owner: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    provisional: true
+    meaning: >
+      Monotonic invoice counter state. Counter continuity across power cycles is
+      mandatory per SR_SYS_006. Counter must advance atomically with the signed
+      invoice record.
+
+  - entity_ref: E_TRANSACTION_COUNTER_STATE
+    semantic_owner: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    provisional: true
+    meaning: >
+      Transaction-level counter state used in conjunction with invoice counters
+      for sequence integrity across fiscalization operations.
+
+  # --- Configuration (read-only in this subview) ---
+  - entity_ref: E_DEVICE_IDENTITY_RECORD
+    semantic_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    meaning: >
+      Device identity, PAC, and TIN configuration. Read by fiscalization engine
+      for invoice construction. Owned by command lifecycle coordinator.
+
+  - entity_ref: E_TAX_RATES_SNAPSHOT
+    semantic_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    meaning: >
+      Currently-active tax rate table. Read by fiscalization engine for tax
+      calculation. Owned by command lifecycle coordinator.
+
+  - entity_ref: E_OPERATIONAL_PARAMETERS_RECORD
+    semantic_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    meaning: >
+      NTP endpoint, backend URL, and other operational parameters. Read by
+      fiscalization engine for invoice enrichment. Owned by command lifecycle
+      coordinator.
+
+  # --- Evidence append (handoff entities) ---
+  - entity_ref: E_LOCAL_JOURNAL_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    append_source: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    meaning: >
+      Append-only local fiscal evidence record. Created by local fiscalization
+      engine after successful CreateInvoice. Backlog evolution ownership transfers
+      to the audit and proof lifecycle manager from this point.
+
+  - entity_ref: E_AUDIT_PACKAGE_RECORD
+    semantic_owner: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    append_source: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    meaning: >
+      Canonical audit package (key, iv, payload). Created by local fiscalization
+      engine alongside the journal record. Backlog evolution ownership transfers
+      to the audit and proof lifecycle manager.
+
+access_patterns:
+  # --- Local fiscalization happy path ---
+  - id: AP_CMP_LOCAL_FISCALIZE
+    owner_component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    reads:
+      - E_DEVICE_IDENTITY_RECORD
+      - E_TAX_RATES_SNAPSHOT
+      - E_OPERATIONAL_PARAMETERS_RECORD
+      - E_INVOICE_COUNTER_STATE
+      - E_TRANSACTION_COUNTER_STATE
+    writes:
+      - E_INVOICE_COUNTER_STATE
+      - E_TRANSACTION_COUNTER_STATE
+      - E_LOCAL_JOURNAL_RECORD
+      - E_AUDIT_PACKAGE_RECORD
+    trigger_family:
+      - create_invoice_local
+    notes: >
+      Atomic operation: read configuration + advance counters + sign via SE adapter
+      + append evidence. Counter advance and evidence append must be atomic with
+      the signed invoice. If signing fails, counters must not advance.
+
+  # --- Counter continuity on restart ---
+  - id: AP_CMP_RESTORE_COUNTER_STATE
+    owner_component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    reads:
+      - E_INVOICE_COUNTER_STATE
+      - E_TRANSACTION_COUNTER_STATE
+    writes: []
+    trigger_family:
+      - system_bootstrap
+    notes: >
+      Counter state must be restorable across power cycles. The fiscalization
+      engine reads persisted counter state on startup to ensure continuity.
+
+ownership_rules:
+  - id: LFS_001
+    statement: >
+      Counter state ownership belongs provisionally to
+      CC_ESDC_LOCAL_FISCALIZATION_ENGINE. It is the only component that reads and
+      advances counters per the structural source.
+  - id: LFS_002
+    statement: >
+      Configuration read dependency is one-directional: the fiscalization engine
+      reads from ST_SYSTEM_CONFIGURATION_STATE but never writes to it.
+  - id: LFS_003
+    statement: >
+      Evidence append is a handoff. The fiscalization engine creates the initial
+      journal and audit package records but does not own backlog evolution,
+      disposition, or compaction.
+  - id: LFS_004
+    statement: >
+      Adapters (secure element) participate in the fiscalization flow but do not
+      own or persist any storage entities.
+
+invariants:
+  - id: INV_LFS_001
+    statement: >
+      Counter continuity across power cycles is mandatory. Counter state must be
+      persisted durably enough to survive unexpected shutdown.
+    sys_rule_ref: SR_SYS_006
+  - id: INV_LFS_002
+    statement: >
+      Counter advance and evidence append must be atomic with the signed invoice
+      record. Partial state (advanced counter without evidence, or evidence
+      without advanced counter) is a consistency violation.
+  - id: INV_LFS_003
+    statement: >
+      Append-only journal semantics: once a journal record is written, it may be
+      pruned only through explicit policy-driven compaction, not through casual
+      update or overwrite.
+    sys_rule_ref: SR_SYS_007
+  - id: INV_LFS_004
+    statement: >
+      AuditPackage canonical shape (key, iv, payload) must be preserved without
+      local aliasing or semantic reshaping at the point of creation.
+    sys_rule_ref: SR_SYS_008
+  - id: INV_LFS_005
+    statement: >
+      VerificationUrl must be stored as evidence enrichment, not consumed as a
+      runtime dependency.
+    sys_rule_ref: SR_SYS_009
+
+forbidden_couplings:
+  - id: FBD_LFS_001
+    statement: >
+      Do not let the fiscalization engine own audit backlog evolution. The append
+      handoff boundary is the limit of its storage authority.
+  - id: FBD_LFS_002
+    statement: >
+      Do not let the fiscalization engine write to configuration state. The
+      command lifecycle coordinator is the exclusive configuration owner.
+  - id: FBD_LFS_003
+    statement: >
+      Do not couple counter advance to network availability or backend liveness.
+      Local fiscalization must work offline.
+  - id: FBD_LFS_004
+    statement: >
+      Do not merge counter state into audit evidence state. They are logically
+      separate stores with different lifecycle and ownership characteristics.
+
+refinement_targets:
+  next_dynamic_views:
+    - S_CMP_ESDC_LOCAL_FISCALIZATION
+  next_unit_focus:
+    - counter persistence port
+    - evidence append port
+    - counter-advance-plus-sign-plus-append transaction boundary
+    - counter restoration on bootstrap
+
+analysis_notes:
+  - This subview captures a narrower slice than the audit/proof subview because the
+    fiscalization engine has a focused role: read config, advance counters, sign,
+    append evidence.
+  - The key design tension is the atomicity boundary: counter advance + signing +
+    evidence append must all succeed or none should persist. This will constrain
+    the underlying persistence strategy.
+  - Counter state is the only provisional ownership in this subview. It is unlikely
+    to be reassigned since only one component touches counters.
+  - The handoff from this subview to the audit/proof subview is the E_LOCAL_JOURNAL_RECORD
+    and E_AUDIT_PACKAGE_RECORD append — explicitly documented as a one-way transfer
+    of backlog evolution authority.

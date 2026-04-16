@@ -1,0 +1,323 @@
+artifact_kind: component_storage_access_matrix
+schema_version: "0.1"
+
+card:
+  id: SMX_CMP_OPEN_FISCAL_CORE_STORAGE_ACCESS
+  name: Open Fiscal Core — Component Storage Access Matrix
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-access
+  level: component
+  scope: >
+    Component-level logical access matrix over already-defined system-level runtime stores.
+  purpose: >
+    Make read/write/append/stage access explicit per candidate component,
+    while staying strictly within structural-view evidence and without
+    introducing repository APIs, DB schema, or deployment-specific binding.
+
+traceability:
+  source_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_storage_refs:
+    - SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+    - SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+    - SD_CMP_OPEN_FISCAL_CORE_STORAGE_OWNERSHIP
+
+source_policy:
+  derivation_mode: structural_view_only
+  rules:
+    - Infer access only from explicit component responsibility, boundary, and ownership language in the structural source.
+    - Do not infer transport, table, file, ORM, or repository structure.
+    - If the structural source does not justify a write-capable relationship, default to read-only or no access.
+    - Adapter components do not receive canonical store ownership in this artifact.
+
+legend:
+  access_symbols:
+    none: "—"
+    read: "R"
+    create: "C"
+    update: "U"
+    append: "A"
+    compact: "K"
+    stage: "S"
+  authority_symbols:
+    owner_writer: OW
+    support_writer: SW
+    read_only_consumer: RO
+    transient_only: TO
+    no_persistent_access: NP
+
+stores:
+  - ST_SYSTEM_CONFIGURATION_STATE
+  - ST_COUNTER_STATE
+  - ST_AUDIT_EVIDENCE_STATE
+  - ST_PROOF_LIFECYCLE_STATE
+  - ST_COMMAND_RECOVERY_STATE
+  - ST_EXPORT_STAGING_STATE
+
+components:
+  - CC_ESIR_FACADE
+  - CC_ESIR_INVOICE_REQUEST_VALIDATION
+  - CC_ESIR_FISCALIZATION_ROUTE_SELECTOR
+  - CC_ESIR_TAXCORE_VSDC_ADAPTER
+  - CC_ESDC_FACADE
+  - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+  - CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+  - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+  - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+  - CC_ESDC_SECURE_ELEMENT_ADAPTER
+  - CC_ESDC_TAXCORE_SHARED_ADAPTER
+  - CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+  - CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+  - CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+
+matrix:
+  - component_ref: CC_ESIR_FACADE
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      ESIR is business-facing orchestration and does not own backend/audit persistent state.
+
+  - component_ref: CC_ESIR_INVOICE_REQUEST_VALIDATION
+    authority_role: TO
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Validation component is pure request preparation in the structural source.
+
+  - component_ref: CC_ESIR_FISCALIZATION_ROUTE_SELECTOR
+    authority_role: TO
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Route selection is policy logic, not persistent-state ownership.
+
+  - component_ref: CC_ESIR_TAXCORE_VSDC_ADAPTER
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      External V-SDC adapter is transport-only in the structural source.
+
+  - component_ref: CC_ESDC_FACADE
+    authority_role: RO
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "R"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "R"
+      ST_EXPORT_STAGING_STATE: "R"
+    rationale: >
+      Facade coordinates bootstrap/status/export entry flows but is not the declared lifecycle owner.
+
+  - component_ref: CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    authority_role: OW
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "R"
+      ST_COUNTER_STATE: "RU"
+      ST_AUDIT_EVIDENCE_STATE: "A"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Structural source gives it synchronous local CreateInvoice ownership and audit-trace handoff.
+
+  - component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    authority_role: OW
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "RU"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "CRUK"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Structural source says it receives, classifies, applies, and confirms backend/media commands.
+
+  - component_ref: CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    authority_role: OW
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "CRUAK"
+      ST_PROOF_LIFECYCLE_STATE: "CRUK"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "CRUSK"
+    rationale: >
+      Structural source makes it owner of audit backlog, remote audit submission, proof cycle, and local export set.
+
+  - component_ref: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    authority_role: OW
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "R"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "R"
+      ST_PROOF_LIFECYCLE_STATE: "R"
+      ST_COMMAND_RECOVERY_STATE: "CRU"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Structural source makes it owner of readiness/status derivation, PIN/operator recovery, and environment refresh context.
+
+  - component_ref: CC_ESDC_SECURE_ELEMENT_ADAPTER
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Secure Element adapter is device/protocol realization only.
+
+  - component_ref: CC_ESDC_TAXCORE_SHARED_ADAPTER
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Shared TaxCore adapter is external-provider transport logic only.
+
+  - component_ref: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Backend adapter is external protocol realization, not canonical store owner.
+
+  - component_ref: CC_ESDC_PKI_CLIENT_CONTEXT_ADAPTER
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      PKI context adapter only reads external certificate context.
+
+  - component_ref: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+    authority_role: NP
+    accesses:
+      ST_SYSTEM_CONFIGURATION_STATE: "—"
+      ST_COUNTER_STATE: "—"
+      ST_AUDIT_EVIDENCE_STATE: "—"
+      ST_PROOF_LIFECYCLE_STATE: "—"
+      ST_COMMAND_RECOVERY_STATE: "—"
+      ST_EXPORT_STAGING_STATE: "—"
+    rationale: >
+      Removable-media adapter is file/device I/O seam, not export-state owner.
+
+store_summaries:
+  - store_ref: ST_SYSTEM_CONFIGURATION_STATE
+    writers:
+      - CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    readers:
+      - CC_ESDC_FACADE
+      - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    notes:
+      - Structural source does not expose a dedicated bootstrap/config manager at CMP level.
+
+  - store_ref: ST_COUNTER_STATE
+    writers:
+      - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    readers:
+      - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+    notes:
+      - Counter ownership remains provisional until lower-level dynamic views introduce a narrower counter owner.
+
+  - store_ref: ST_AUDIT_EVIDENCE_STATE
+    writers:
+      - CC_ESDC_LOCAL_FISCALIZATION_ENGINE
+      - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    readers:
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    notes:
+      - Local fiscalization appends evidence; lifecycle manager owns backlog evolution and compaction.
+
+  - store_ref: ST_PROOF_LIFECYCLE_STATE
+    writers:
+      - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    readers:
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    notes:
+      - Proof ownership is clean in the structural source.
+
+  - store_ref: ST_COMMAND_RECOVERY_STATE
+    writers:
+      - CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+      - CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    readers:
+      - CC_ESDC_FACADE
+    notes:
+      - Command lifecycle and readiness/recovery each own distinct parts of the same logical store family.
+
+  - store_ref: ST_EXPORT_STAGING_STATE
+    writers:
+      - CC_ESDC_AUDIT_AND_PROOF_LIFECYCLE_MANAGER
+    readers:
+      - CC_ESDC_FACADE
+    notes:
+      - Export ownership stays provisional until a dedicated export manager exists in structural or dynamic refinement.
+
+constraints:
+  - id: SMX_001
+    statement: >
+      ESIR-side candidate components do not receive direct persistent-store ownership.
+    rationale: >
+      Structural source explicitly reserves shared persistent state behind the E-SDC boundary.
+
+  - id: SMX_002
+    statement: >
+      Adapter components do not receive canonical store ownership in this matrix.
+    rationale: >
+      Structural source models them as dependency seams, not lifecycle owners.
+
+  - id: SMX_003
+    statement: >
+      This matrix is logical access only and does not define repositories, tables, files, or deployment bindings.
+    rationale: >
+      Those belong to lower implementation layers and physical storage design.
+
+open_points:
+  - subject: ST_COUNTER_STATE
+    note: >
+      Revisit after component-level local fiscalization dynamic view. A separate counter or continuity manager may emerge.
+  - subject: ST_EXPORT_STAGING_STATE
+    note: >
+      Revisit after component-level local audit export dynamic view. A dedicated export manager may emerge.
+
+analysis_notes:
+  - The strongest clean structural ownership exists on the E-SDC side, not the ESIR side.
+  - This artifact is intentionally conservative: where structural evidence is weak, access stays narrow.

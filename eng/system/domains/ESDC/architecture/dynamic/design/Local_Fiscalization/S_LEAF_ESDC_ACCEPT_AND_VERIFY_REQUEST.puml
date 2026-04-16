@@ -1,0 +1,75 @@
+@startuml
+title Accept and verify local fiscalization request — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "LocalFiscalizationEngine" as CC_LFE <<component>>
+end box
+
+note over CC_LFE #FFF8DC
+S_LEAF_ESDC_ACCEPT_AND_VERIFY_REQUEST
+parent_ref: S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER / GRP_LOCAL_FISC_ACCEPT_AND_VERIFY
+guard_ref: G_ESDC_LOCAL_FISCALIZATION_REQUEST_ACCEPTABLE
+behavior_ref: B_ESDC_LOCAL_FISCALIZATION_ACCEPT_REQUEST
+end note
+
+note over CC_LFE
+  E-SDC performs its own verification of the InvoiceRequest
+  independent of ESIR-side validation. This covers E-SDC-specific
+  preconditions: certificate validity, local configuration state,
+  and tax handling verification.
+end note
+
+' ============================================================================
+' S1 — Verify request format and content
+' ============================================================================
+group S1 "GRP_ACCEPT_VERIFY_FORMAT"
+  CC_LFE -> CC_LFE : verify InvoiceRequest structure matches expected CreateInvoice contract\n[step=S1.1]\n[vals request=<InvoiceRequest>]
+  CC_LFE -> CC_LFE : verify invoiceType and transactionType are supported by local E-SDC\n[step=S1.2]
+
+  alt [COND=request format invalid]
+    CC_LFE -> CC_LFE : reject with format error\n[step=S1.3e]\n[vals request_acceptable=false; error=ValidationErrorResponse]
+  end
+end
+
+' ============================================================================
+' S2 — Determine tax handling
+' ============================================================================
+group S2 "GRP_ACCEPT_DETERMINE_TAX_HANDLING"
+  CC_LFE -> CC_LFE : resolve tax labels against locally cached tax rates\n[step=S2.1]\n[vals labels=<item_labels[]>; local_tax_rates=<cached_TaxRatesResponse>]
+  CC_LFE -> CC_LFE : verify all labels are known and rates are current\n[step=S2.2]
+
+  alt [COND=unknown label or stale tax rates]
+    CC_LFE -> CC_LFE : reject with tax handling error\n[step=S2.3e]\n[vals request_acceptable=false; error=GENERAL_STATUS_CODE]
+  end
+end
+
+' ============================================================================
+' S3 — Check certificate validity and local preconditions
+' ============================================================================
+group S3 "GRP_ACCEPT_CHECK_LOCAL_PRECONDITIONS"
+  CC_LFE -> CC_LFE : check SE certificate is within validity window\n[step=S3.1]\n[vals cert_valid=<bool>; cert_valid_until=<datetime>]
+  CC_LFE -> CC_LFE : check local E-SDC is bootstrapped and configured\n[step=S3.2]\n[vals bootstrapped=<bool>]
+  CC_LFE -> CC_LFE : check no blocking conditions (audit-required already cleared)\n[step=S3.3]
+
+  alt [COND=certificate expired or not bootstrapped]
+    CC_LFE -> CC_LFE : reject with precondition failure\n[step=S3.4e]\n[vals request_acceptable=false; error=GENERAL_STATUS_CODE]
+  end
+end
+
+' ============================================================================
+' S4 — Accept request
+' ============================================================================
+group S4 "GRP_ACCEPT_CONFIRM"
+  CC_LFE -> CC_LFE : request accepted for local fiscalization\n[step=S4.1]\n[vals request_acceptable=true]
+end
+
+@enduml

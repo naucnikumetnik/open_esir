@@ -1,0 +1,72 @@
+@startuml
+title Evaluate online (V-SDC) path availability — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "FiscalizationRouteSelector" as CC_ROUTE <<component>>
+end box
+
+note over CC_ROUTE #FFF8DC
+S_LEAF_ESIR_EVALUATE_ONLINE_ALLOWED
+guard_ref: G_ESIR_FISCALIZATION_ONLINE_ALLOWED
+parent_ref: S_CMP_ESIR_ROUTE_SELECTION_MASTER / GRP_ROUTE_EVALUATE_ONLINE
+end note
+
+note over CC_ROUTE
+  Evaluates whether the V-SDC online fiscalization path
+  is available for this request.
+
+  Uses cached readiness context — no live network probes.
+  Source authority: configured fiscalization mode, PFX certificate
+  state, and V-SDC endpoint reachability from last status check.
+end note
+
+' ============================================================================
+' S1 — Check configured fiscalization mode
+' ============================================================================
+group S1 "GRP_ONLINE_CHECK_CONFIGURED_MODE"
+  CC_ROUTE -> CC_ROUTE : check configuredMode includes V-SDC path\n[step=S1.1]\n[vals configuredMode=<V_SDC|E_SDC|PREFER_ONLINE|PREFER_LOCAL>]
+
+  alt [COND=configuredMode == E_SDC]
+    CC_ROUTE -> CC_ROUTE : online path not configured\n[step=S1.2]\n[vals online_allowed=false; online_reason=not_configured]
+  end
+end
+
+' ============================================================================
+' S2 — Check PFX certificate availability and validity
+' ============================================================================
+group S2 "GRP_ONLINE_CHECK_PFX_CERTIFICATE"
+  CC_ROUTE -> CC_ROUTE : check PFX digital certificate present and within validity window\n[step=S2.1]\n[vals pfx_present=<bool>; pfx_valid_until=<datetime>]
+
+  alt [COND=pfx_present == false or pfx_expired]
+    CC_ROUTE -> CC_ROUTE : PFX certificate unavailable or expired\n[step=S2.2]\n[vals online_allowed=false; online_reason=certificate_expired]
+  end
+end
+
+' ============================================================================
+' S3 — Check V-SDC endpoint reachability
+' ============================================================================
+group S3 "GRP_ONLINE_CHECK_VSDC_REACHABILITY"
+  CC_ROUTE -> CC_ROUTE : check internet connectivity and V-SDC endpoint health from readiness context\n[step=S3.1]\n[vals vsdc_reachable=<bool>; last_vsdc_status=<ok|unreachable|timeout>]
+
+  alt [COND=vsdc_reachable == false]
+    CC_ROUTE -> CC_ROUTE : V-SDC endpoint unreachable\n[step=S3.2]\n[vals online_allowed=false; online_reason=unreachable]
+  end
+end
+
+' ============================================================================
+' S4 — Derive online availability
+' ============================================================================
+group S4 "GRP_ONLINE_DERIVE_RESULT"
+  CC_ROUTE -> CC_ROUTE : all online preconditions satisfied\n[step=S4.1]\n[vals online_allowed=true; online_reason=available]
+end
+
+@enduml

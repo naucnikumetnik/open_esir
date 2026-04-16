@@ -4,6 +4,7 @@ using System.Text;
 using OpenFiscalCore.System.Domains.ESDC.Types.Primitives;
 using OpenFiscalCore.System.Domains.ESDC.Types.SecureElement;
 using OpenFiscalCore.System.Types.Enums;
+using OpenFiscalCore.System.Types.Primitives;
 
 namespace OpenFiscalCore.System.Integration.Adapters;
 
@@ -153,6 +154,122 @@ internal static class SecureElementApduCodec
             ReadUInt56BigEndian(responseSpan[..7]),
             ReadUInt56BigEndian(responseSpan.Slice(7, 7)));
     }
+
+    internal static byte[] BuildGetLastSignedInvoiceCommand() =>
+        BuildExtendedCommand(0x88, 0x15, 0x04, 0x00, ReadOnlySpan<byte>.Empty, includeLe: true, le: 0);
+
+    internal static LastSignedInvoiceResponse ParseLastSignedInvoiceResponse(ReadOnlyMemory<byte> payload)
+    {
+        var responseSpan = payload.Span;
+        var (encryptedInternalDataLength, crcLength) = ResolveSignInvoiceLayout(responseSpan.Length);
+
+        var dateTimeUtc = DateTimeOffset.FromUnixTimeMilliseconds((long)BinaryPrimitives.ReadUInt64BigEndian(responseSpan[..8]));
+        var taxpayerId = ReadLeftPaddedAscii(responseSpan.Slice(8, 20));
+        var buyerId = ReadLeftPaddedAscii(responseSpan.Slice(28, 20));
+        var invoiceType = ParseEnum<TaxCoreInvoiceType>(responseSpan[48], nameof(TaxCoreInvoiceType));
+        var transactionType = ParseEnum<TaxCoreTransactionType>(responseSpan[49], nameof(TaxCoreTransactionType));
+        var invoiceAmount = ReadUInt56BigEndian(responseSpan.Slice(50, 7));
+        var saleOrRefundCounterValue = BinaryPrimitives.ReadUInt32BigEndian(responseSpan.Slice(57, 4));
+        var totalCounterValue = BinaryPrimitives.ReadUInt32BigEndian(responseSpan.Slice(61, 4));
+        var encryptedInternalDataOffset = 65;
+        var encryptedInternalData = responseSpan.Slice(encryptedInternalDataOffset, encryptedInternalDataLength).ToArray();
+        var digitalSignatureOffset = encryptedInternalDataOffset + encryptedInternalDataLength;
+        var digitalSignature = responseSpan.Slice(digitalSignatureOffset, 256).ToArray();
+
+        uint? crc = null;
+        if (crcLength == 4)
+        {
+            crc = BinaryPrimitives.ReadUInt32BigEndian(responseSpan.Slice(digitalSignatureOffset + 256, 4));
+        }
+
+        return new LastSignedInvoiceResponse(
+            dateTimeUtc,
+            taxpayerId,
+            buyerId,
+            invoiceType,
+            transactionType,
+            invoiceAmount,
+            saleOrRefundCounterValue,
+            totalCounterValue,
+            encryptedInternalData,
+            digitalSignature,
+            crc);
+    }
+
+    internal static byte[] BuildGetSecureElementVersionCommand() =>
+        BuildShortCommand(0x88, 0x08, 0x04, 0x00, ReadOnlySpan<byte>.Empty, le: 12);
+
+    internal static SecureElementVersionResponse ParseSecureElementVersionResponse(ReadOnlyMemory<byte> payload)
+    {
+        if (payload.Length != 12)
+        {
+            throw new InvalidDataException("SecureElementVersion APDU must return exactly 12 bytes.");
+        }
+
+        var responseSpan = payload.Span;
+        return new SecureElementVersionResponse(
+            BinaryPrimitives.ReadUInt32BigEndian(responseSpan[..4]),
+            BinaryPrimitives.ReadUInt32BigEndian(responseSpan.Slice(4, 4)),
+            BinaryPrimitives.ReadUInt32BigEndian(responseSpan.Slice(8, 4)));
+    }
+
+    internal static byte[] BuildGetCertParamsCommand() =>
+        BuildShortCommand(0x88, 0x33, 0x04, 0x00, ReadOnlySpan<byte>.Empty, le: 0);
+
+    internal static SecureElementCertParamsResponse ParseCertParamsResponse(ReadOnlyMemory<byte> payload)
+    {
+        if (payload.Length < 24)
+        {
+            throw new InvalidDataException("CertParams APDU must return at least 24 bytes (8 UID + 8 NotBefore + 8 NotAfter).");
+        }
+
+        var responseSpan = payload.Span;
+        var uid = Uid.Create(ReadLeftPaddedAscii(responseSpan[..8]));
+        var notBefore = DateTimeOffset.FromUnixTimeMilliseconds((long)BinaryPrimitives.ReadUInt64BigEndian(responseSpan.Slice(8, 8)));
+        var notAfter = DateTimeOffset.FromUnixTimeMilliseconds((long)BinaryPrimitives.ReadUInt64BigEndian(responseSpan.Slice(16, 8)));
+
+        return new SecureElementCertParamsResponse(uid, notBefore, notAfter);
+    }
+
+    internal static byte[] BuildForwardDirectiveCommand(ForwardSecureElementDirectiveRequest request) =>
+        BuildExtendedCommand(0x88, 0x40, 0x04, 0x00, request.Payload.Span, includeLe: false, le: null);
+
+    internal static byte[] BuildGetPinTriesLeftCommand() =>
+        BuildShortCommand(0x88, 0x16, 0x04, 0x00, ReadOnlySpan<byte>.Empty, le: 1);
+
+    internal static PinTriesLeft ParsePinTriesLeftResponse(ReadOnlyMemory<byte> payload)
+    {
+        if (payload.Length != 1)
+        {
+            throw new InvalidDataException("GetPinTriesLeft APDU must return exactly 1 byte.");
+        }
+
+        return new PinTriesLeft(payload.Span[0]);
+    }
+
+    internal static byte[] BuildSelectPkiAppletCommand(string pkiApplicationIdHex)
+    {
+        var aid = Convert.FromHexString(pkiApplicationIdHex);
+        return BuildShortCommand(0x00, 0xA4, 0x04, 0x00, aid, le: 0);
+    }
+
+    internal static byte[] BuildExportCertificateCommand() =>
+        BuildExtendedCommand(0x88, 0x04, 0x04, 0x00, ReadOnlySpan<byte>.Empty, includeLe: true, le: 0);
+
+    internal static ExportedCertificateDer ParseExportCertificateResponse(ReadOnlyMemory<byte> payload) =>
+        new(payload.ToArray());
+
+    internal static byte[] BuildExportTaxCorePublicKeyCommand() =>
+        BuildExtendedCommand(0x88, 0x07, 0x04, 0x00, ReadOnlySpan<byte>.Empty, includeLe: true, le: 259);
+
+    internal static TaxCorePublicKey ParseExportTaxCorePublicKeyResponse(ReadOnlyMemory<byte> payload) =>
+        new(payload.ToArray());
+
+    internal static byte[] BuildExportAuditDataCommand() =>
+        BuildExtendedCommand(0x88, 0x12, 0x04, 0x00, ReadOnlySpan<byte>.Empty, includeLe: true, le: 264);
+
+    internal static ExportedAuditData ParseExportAuditDataResponse(ReadOnlyMemory<byte> payload) =>
+        new(payload.ToArray());
 
     private static (int EncryptedInternalDataLength, int CrcLength) ResolveSignInvoiceLayout(int length)
     {

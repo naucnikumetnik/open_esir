@@ -1,0 +1,85 @@
+@startuml
+title Execute captured commands — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "CommandLifecycleCoordinator" as CC_CLC <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control "SecureElement\n(Smart Card)" as EXT_SE <<external>>
+end box
+
+note over CC_CLC, EXT_SE #FFF8DC
+S_LEAF_ESDC_EXECUTE_COMMANDS
+parent_ref: S_CMP_ESDC_BACKEND_SYNC_MASTER / GRP_BACKEND_SYNC_EXECUTE
+behavior_ref: B_ESDC_BACKEND_SYNC_EXECUTE_COMMANDS
+state_machine_ref: SM_SYS_ESDC_BACKEND_SYNC_AND_COMMAND / ST_ESDC_BACKEND_SYNC_EXECUTING
+end note
+
+note over CC_CLC
+  CommandLifecycleCoordinator processes each command from the backlog
+  sequentially. Command types include configuration updates
+  (NTP, tax rates, certificates, environment URLs) and SE
+  management directives. Each command execution produces a
+  boolean outcome (success / failure).
+end note
+
+' ============================================================================
+' S1 — Command execution loop
+' ============================================================================
+group S1 "GRP_EXECUTE_LOOP"
+  loop [COND=for each Command in command_backlog]
+
+    CC_CLC -> CC_CLC : classify command type\n[step=S1.1]\n[vals command_type=<NTP_CONFIG|TAX_RATE_UPDATE|CERT_UPDATE|ROOT_CERT_UPDATE|ENV_URL_CONFIG|SE_DIRECTIVE>]
+
+    ' ==========================================================================
+    ' S2 — Apply configuration command
+    ' ==========================================================================
+    alt [COND=command_type is configuration (NTP, tax rates, certs, URLs)]
+      group S2 "GRP_EXECUTE_CONFIG_COMMAND"
+        CC_CLC -> CC_CLC : apply configuration payload to local state\n[step=S2.1]\n[vals payload=<command.payload>; target=<configuration_store>]\n[store_write entity=ST_SYSTEM_CONFIGURATION_STATE; pattern_ref=AP_CMP_APPLY_AND_ACK_COMMAND]
+
+        alt [COND=payload valid and applied]
+          CC_CLC -> CC_CLC : mark command outcome = SUCCESS\n[step=S2.2a]\n[vals outcome=true]
+        else [COND=payload rejected or format error]
+          CC_CLC -> CC_CLC : mark command outcome = FAILURE\n[step=S2.2e]\n[vals outcome=false; reason=<validation_error|apply_error>]
+        end
+      end
+
+    ' ==========================================================================
+    ' S3 — Apply SE directive (forwarded to Secure Element)
+    ' ==========================================================================
+    else [COND=command_type is SE directive]
+      group S3 "GRP_EXECUTE_SE_DIRECTIVE"
+        CC_CLC -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.relaySeDirective(directive:SeDirectivePayload) -> Result[SeDirectiveResult]\n[step=S3.1]\n[connection use_port=P_CLC_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_CLC__SEA__SECURE_ELEMENT]
+        activate CC_SEA
+        CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.APDU(CLA, INS, P1, P2, Lc, Data)\n[step=S3.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+        activate EXT_SE
+        EXT_SE --> CC_SEA : [step=S3.2r]\n[vals SW=<sw1sw2>; response_data=<bytes>]
+        deactivate EXT_SE
+        CC_SEA --> CC_CLC : [step=S3.1r]\n[vals se_result=<success|error>; sw=<sw1sw2>]
+        deactivate CC_SEA
+
+        alt [COND=se_result == success (SW=0x9000)]
+          CC_CLC -> CC_CLC : mark command outcome = SUCCESS\n[step=S3.3a]\n[vals outcome=true]
+        else [COND=se_result == error]
+          CC_CLC -> CC_CLC : mark command outcome = FAILURE\n[step=S3.3e]\n[vals outcome=false; reason=se_error; sw=<sw1sw2>]
+        end
+      end
+
+    end
+
+  end
+end
+
+@enduml

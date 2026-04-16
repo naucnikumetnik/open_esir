@@ -1,0 +1,268 @@
+artifact_kind: component_storage_subview
+schema_version: "0.1"
+
+card:
+  id: DV_CMP_ESDC_COMMAND_RECOVERY_STORAGE
+  name: E-SDC Command and Recovery Storage — component subview
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-storage-subview
+  level: component
+  scope: >
+    Focused logical storage subview for the E-SDC command lifecycle and
+    readiness/recovery slice.
+  purpose: >
+    Refine the system storage matrix for ST_COMMAND_RECOVERY_STATE by making
+    lifecycle ownership, entity families, access patterns, and invariants explicit
+    for the selected E-SDC components.
+
+traceability:
+  source_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  related_sys_storage_refs:
+    - DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_COMMAND_RECOVERY_AND_EXPORT
+    - SB_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_BINDINGS
+    - SR_SYS_OPEN_FISCAL_CORE_STORAGE_RULES
+    - SD_CMP_OPEN_FISCAL_CORE_STORAGE_OWNERSHIP
+    - SMX_CMP_OPEN_FISCAL_CORE_STORAGE_ACCESS
+
+source_policy:
+  primary_derivation_source: structural_view
+  supporting_storage_source:
+    - existing_sys_storage_slice_only
+  derivation_rules:
+    - Use structural component responsibilities as the primary source of ownership.
+    - Use existing SYS storage slice only to name the already-defined store and entity families.
+    - Do not introduce repository APIs, table design, file layout, or deployment bindings.
+    - Do not allocate new components not present in the structural source.
+
+focus:
+  primary_store_ref: ST_COMMAND_RECOVERY_STATE
+  supporting_store_refs:
+    - ST_SYSTEM_CONFIGURATION_STATE
+  focus_entities:
+    - E_BACKEND_AUTH_CONTEXT
+    - E_BACKEND_COMMAND_RECORD
+    - E_BACKEND_COMMAND_INDEX
+    - E_READINESS_RECOVERY_SNAPSHOT
+
+components_in_scope:
+  - component_ref: CC_ESDC_FACADE
+    role: coordinating_reader
+    structural_basis: >
+      Facade coordinates bootstrap, status/recovery, fiscalization, backend sync,
+      audit/proof, and local export entry flows.
+    persistent_state_role: >
+      Reads command/recovery state to coordinate entry decisions, but is not the
+      canonical lifecycle owner.
+
+  - component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    role: command_lifecycle_owner
+    structural_basis: >
+      Receives, classifies, applies, and confirms backend/media commands through a
+      unified command lifecycle flow.
+    persistent_state_role: >
+      Canonical owner of command persistence, command index evolution, command
+      application state, and backend-auth refresh support.
+
+  - component_ref: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    role: readiness_recovery_owner
+    structural_basis: >
+      Derives readiness/status classification, drives PIN/operator recovery, and
+      refreshes environment context.
+    persistent_state_role: >
+      Canonical owner of readiness/recovery snapshot semantics and recovery-facing
+      operational state.
+
+  - component_ref: CC_ESDC_TAXCORE_ESDC_BACKEND_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_TAXCORE_ESDC_BACKEND.
+    persistent_state_role: none
+
+  - component_ref: CC_ESDC_REMOVABLE_MEDIA_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_REMOVABLE_MEDIA_IO.
+    persistent_state_role: none
+
+  - component_ref: CC_ESDC_TAXCORE_SHARED_ADAPTER
+    role: protocol_adapter
+    structural_basis: >
+      Realizes IF_DEP_TAXCORE_SHARED bootstrap/configuration calls.
+    persistent_state_role: none
+
+logical_store_contract:
+  store_ref: ST_COMMAND_RECOVERY_STATE
+  summary: backend_auth + command_lifecycle + readiness_recovery_snapshots
+  owner_split:
+    - command_lifecycle_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    - readiness_recovery_owner: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+  coordinating_readers:
+    - CC_ESDC_FACADE
+
+entity_families:
+  - entity_ref: E_BACKEND_AUTH_CONTEXT
+    semantic_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    meaning: >
+      Persisted backend-auth cache projection whose lifetime follows token validity
+      and refresh/expiry replacement rules.
+
+  - entity_ref: E_BACKEND_COMMAND_RECORD
+    semantic_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    meaning: >
+      Canonical stored backend/media command payload plus local execution and
+      acknowledgement metadata.
+
+  - entity_ref: E_BACKEND_COMMAND_INDEX
+    semantic_owner: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    meaning: >
+      Query/support index over stored commands so command state stays queryable
+      without collapsing into transport pull history.
+
+  - entity_ref: E_READINESS_RECOVERY_SNAPSHOT
+    semantic_owner: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    meaning: >
+      Explicit recovery snapshot that captures current readiness/recovery posture,
+      last-known-good context, and operator-facing recovery facts.
+
+access_patterns:
+  - id: AP_CMP_CAPTURE_BACKEND_AUTH_CONTEXT
+    owner_component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    reads:
+      - ST_SYSTEM_CONFIGURATION_STATE
+    writes:
+      - E_BACKEND_AUTH_CONTEXT
+    trigger_family:
+      - bootstrap
+      - backend_sync
+    notes: >
+      Refreshes or replaces backend auth context as a persisted cache projection.
+
+  - id: AP_CMP_CAPTURE_COMMANDS
+    owner_component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    reads:
+      - E_BACKEND_COMMAND_INDEX
+    writes:
+      - E_BACKEND_COMMAND_RECORD
+      - E_BACKEND_COMMAND_INDEX
+    trigger_family:
+      - bootstrap_initialization_commands
+      - backend_sync
+      - media_delivered_commands
+    notes: >
+      Inserts or replaces canonical commands and updates query/index state.
+
+  - id: AP_CMP_APPLY_AND_ACK_COMMAND
+    owner_component_ref: CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR
+    reads:
+      - E_BACKEND_COMMAND_RECORD
+      - E_BACKEND_COMMAND_INDEX
+    writes:
+      - E_BACKEND_COMMAND_RECORD
+      - E_BACKEND_COMMAND_INDEX
+      - E_READINESS_RECOVERY_SNAPSHOT
+      - ST_SYSTEM_CONFIGURATION_STATE
+    trigger_family:
+      - command_application
+      - bootstrap_apply_initialization_commands
+    notes: >
+      Command application may update config and recovery posture, but command
+      payload remains canonical and separately queryable.
+
+  - id: AP_CMP_WRITE_RECOVERY_SNAPSHOT
+    owner_component_ref: CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+    reads:
+      - ST_SYSTEM_CONFIGURATION_STATE
+      - E_BACKEND_AUTH_CONTEXT
+      - E_BACKEND_COMMAND_INDEX
+      - E_READINESS_RECOVERY_SNAPSHOT
+    writes:
+      - E_READINESS_RECOVERY_SNAPSHOT
+    trigger_family:
+      - check_ready
+      - get_status
+      - verify_pin
+      - environment_refresh
+    notes: >
+      Keeps recovery and readiness explicit instead of leaving it implicit in config
+      or command blobs.
+
+  - id: AP_CMP_READ_RECOVERY_CONTEXT
+    owner_component_ref: CC_ESDC_FACADE
+    reads:
+      - E_READINESS_RECOVERY_SNAPSHOT
+      - E_BACKEND_AUTH_CONTEXT
+      - E_BACKEND_COMMAND_INDEX
+    writes: []
+    trigger_family:
+      - bootstrap_entry
+      - readiness_entry
+      - recovery_entry
+    notes: >
+      Facade is a coordination reader only.
+
+ownership_rules:
+  - id: CRS_001
+    statement: >
+      Command payload ownership belongs to CC_ESDC_COMMAND_LIFECYCLE_COORDINATOR.
+      Recovery manager may consume command-derived facts, but does not own command
+      persistence as canonical payload.
+  - id: CRS_002
+    statement: >
+      Readiness/recovery snapshot ownership belongs to
+      CC_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER.
+      Command coordinator may influence recovery posture only by writing facts that
+      recovery manager can consume or by updating the snapshot under command-apply flow
+      explicitly allowed by system rules.
+  - id: CRS_003
+    statement: >
+      CC_ESDC_FACADE may read command/recovery state for coordination, but does not
+      become a canonical writer.
+  - id: CRS_004
+    statement: >
+      Adapters do not own canonical store entities in this subview.
+
+invariants:
+  - id: INV_CRS_001
+    statement: >
+      E_BACKEND_COMMAND_RECORD and E_BACKEND_COMMAND_INDEX remain queryable command
+      state and must not be collapsed into E_READINESS_RECOVERY_SNAPSHOT.
+  - id: INV_CRS_002
+    statement: >
+      E_READINESS_RECOVERY_SNAPSHOT remains explicit recovery/readiness state and
+      must not be reduced to implicit status hidden inside config blobs.
+  - id: INV_CRS_003
+    statement: >
+      E_BACKEND_AUTH_CONTEXT remains a cache projection governed by refresh and expiry,
+      not a long-lived business record.
+  - id: INV_CRS_004
+    statement: >
+      Config mutation caused by command application does not transfer ownership of
+      command state into ST_SYSTEM_CONFIGURATION_STATE.
+
+forbidden_couplings:
+  - id: FBD_CRS_001
+    statement: >
+      Do not treat ST_COMMAND_RECOVERY_STATE as a generic dump store for bootstrap,
+      audit, or export payloads.
+  - id: FBD_CRS_002
+    statement: >
+      Do not let adapter-local transport concerns define canonical storage shape.
+  - id: FBD_CRS_003
+    statement: >
+      Do not merge command lifecycle semantics and readiness snapshot semantics into
+      one undifferentiated record family.
+
+refinement_targets:
+  next_dynamic_views:
+    - S_CMP_ESDC_COMMAND_LIFECYCLE
+    - S_CMP_ESDC_STATUS_AND_OPERATOR_RECOVERY
+  next_unit_focus:
+    - command persistence port
+    - readiness snapshot port
+    - command apply transaction boundary
+    - recovery snapshot update boundary
+
+analysis_notes:
+  - This subview is intentionally narrower than the full storage matrix.
+  - It exists to make the command-vs-recovery ownership split explicit before unit design.
+  - Counter continuity and export staging are intentionally out of scope here.

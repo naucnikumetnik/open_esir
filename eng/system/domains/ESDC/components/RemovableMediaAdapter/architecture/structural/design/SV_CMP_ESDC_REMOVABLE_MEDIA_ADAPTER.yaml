@@ -1,0 +1,67 @@
+artifact_kind: structural_view
+schema_version: '0.2'
+card:
+  id: SV_CMP_ESDC_REMOVABLE_MEDIA_ADAPTER
+  name: RemovableMediaAdapter — component structural view
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-structural
+  level: component
+  scope: Unit decomposition of CC_RMA showing media detection, command import, and filesystem I/O.
+  purpose: Define stable unit boundaries inside RemovableMediaAdapter to prevent naming drift across S_UNIT_ diagrams.
+traceability:
+  parent_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  parent_component_ref: CC_RMA
+  related_dynamic_view_refs:
+  - S_CMP_ESDC_LOCAL_AUDIT_EXPORT_MASTER
+  - S_LEAF_ESDC_DETECT_AND_VALIDATE_MEDIA
+  - S_LEAF_ESDC_IMPORT_MEDIA_COMMANDS
+  - S_LEAF_ESDC_WRITE_EXPORT_ARTIFACTS
+units:
+- id: U_RMA_MEDIA_DETECTOR
+  name: MediaDetector
+  responsibility: >
+    Monitors for removable media insertion events, delegates filesystem
+    probing via IF_DEP_REMOVABLE_MEDIA_IO (inspectRoot, probeFilesystem),
+    validates media structure (SE UID folder presence, filesystem type),
+    and signals media readiness or rejection.
+  key_operations:
+  - listenForMediaInsertion() -> MediaEvent
+  - validateMedia(event) -> MediaValidationResult
+- id: U_RMA_COMMAND_IMPORTER
+  name: CommandImporter
+  responsibility: >
+    Reads command files from removable media via IF_DEP_REMOVABLE_MEDIA_IO,
+    parses command payloads, filters by active SE UID, and records per-command
+    execution results after the facade applies each command.
+  key_operations:
+  - parseAndFilterCommands(mediaPath, seUid) -> Command[]
+  - recordCommandResult(commandId, outcome) -> void
+- id: U_RMA_FILE_IO
+  name: FileIOProxy
+  responsibility: >
+    Thin proxy to IF_DEP_REMOVABLE_MEDIA_IO for structured file operations:
+    ensure directory, read file, write file. Used by MediaDetector (probe),
+    CommandImporter (read), and external callers for export writes
+    (ensureExportFolder, writeAuditPackage, writeArpFile).
+  key_operations:
+  - ensureDirectory(path) -> Result[void]
+  - readFile(path) -> Result[byte[]]
+  - writeFile(path, data) -> Result[void]
+unit_interfaces:
+- id: IF_U_RMA_MEDIA_DETECTOR
+  name: Media Detector
+  provider_unit_ref: U_RMA_MEDIA_DETECTOR
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_LOCAL_AUDIT_EXPORT_MASTER step S1)
+- id: IF_U_RMA_COMMAND_IMPORTER
+  name: Command Importer
+  provider_unit_ref: U_RMA_COMMAND_IMPORTER
+  consumer_unit_refs:
+  - external (CC_FACADE via S_LEAF_ESDC_IMPORT_MEDIA_COMMANDS)
+- id: IF_U_RMA_FILE_IO
+  name: File I/O Proxy
+  provider_unit_ref: U_RMA_FILE_IO
+  consumer_unit_refs:
+  - U_RMA_MEDIA_DETECTOR
+  - U_RMA_COMMAND_IMPORTER
+  - external (CC_APLM, CC_FACADE via S_LEAF_ESDC_WRITE_EXPORT_ARTIFACTS)

@@ -1,0 +1,116 @@
+@startuml
+title Audit and proof lifecycle — E-SDC domain master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+  control "TaxCoreEsdcBackendAdapter" as CC_TBA <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control "TaxCore Backend\n(E-SDC API)" as EXT_TCB <<external>>
+  entity  "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_FACADE, EXT_SE #FFF8DC
+S_CMP_ESDC_AUDIT_AND_PROOF_MASTER
+[semantics lifecycle_spine=true]
+dynamic_view_ref: S_SYS_AUDIT_AND_PROOF_LIFECYCLE
+state_machine_ref: SM_SYS_ESDC_AUDIT_AND_PROOF
+end note
+
+note over CC_APLM
+  AuditAndProofLifecycleManager orchestrates two asynchronous obligations:
+  (1) submit pending AuditPackages to TaxCore Backend and resolve disposition,
+  (2) execute the proof-of-audit cycle with the Secure Element when required.
+  Both obligations progress independently per sync opportunity.
+end note
+
+' ============================================================================
+' S1 — EsdcFacade triggers audit cycle
+' ============================================================================
+group S1 "GRP_AUDIT_TRIGGER"
+  CC_FACADE -> CC_APLM : IF_CMP_ESDC_AUDIT_AND_PROOF.runAuditCycle() -> Result[AuditCycleOutcome]\n[step=S1.1]
+  activate CC_APLM
+end
+
+' ============================================================================
+' S2 — Submit pending audit packages (inter-component: APLM → TBA → TCB)
+' ============================================================================
+alt [COND=packages_pending > 0 AND connectivity_available]
+  group S2 "GRP_AUDIT_SUBMIT"
+    ref over CC_APLM, CC_TBA, EXT_TCB
+      expand=S_LEAF_ESDC_SUBMIT_AUDIT_PACKAGE
+      ref_mode=call_return
+    end ref
+  end
+
+  ' ==========================================================================
+  ' S3 — Resolve disposition (internal to APLM — collapsed)
+  ' ==========================================================================
+  note over CC_APLM
+    Resolve disposition (collapsed — no inter-component calls):
+      For each submitted package, apply AuditDataStatus:
+        verified_delete_local → delete local AuditPackage copy
+        retryable → retain in backlog for next cycle
+        hold_non_retryable → retain without immediate resubmission
+      Evaluate proof obligation:
+        proof_requested_in_response OR proof_interval_elapsed → proof_due=true
+    behavior_ref: B_ESDC_AUDIT_AND_PROOF_RESOLVE_DISPOSITION
+  end note
+
+else [COND=no_pending_packages OR offline]
+  note over CC_APLM
+    No submission — keep current audit backlog state.
+  end note
+end
+
+' ============================================================================
+' S4 — Execute proof-of-audit cycle (inter-component: APLM → SEA → SE, APLM → TBA → TCB)
+' ============================================================================
+alt [COND=proof_due]
+  group S4 "GRP_PROOF_EXECUTE"
+    ref over CC_APLM, CC_SEA, CC_TBA, EXT_SE, EXT_TCB
+      expand=S_LEAF_ESDC_EXECUTE_PROOF_CYCLE
+      ref_mode=call_return
+    end ref
+  end
+
+  ' ==========================================================================
+  ' S5 — Complete proof with EndAuditApdu (inter-component: APLM → SEA → SE)
+  ' ==========================================================================
+  alt [COND=proof_command_available]
+    group S5 "GRP_PROOF_COMPLETE"
+      ref over CC_APLM, CC_SEA, EXT_SE
+        expand=S_LEAF_ESDC_COMPLETE_PROOF
+        ref_mode=call_return
+      end ref
+    end
+  else [COND=proof_not_yet_available]
+    note over CC_APLM
+      Proof cycle pending until backend generates command through
+      regular command channel (S_CMP_ESDC_BACKEND_SYNC_MASTER).
+    end note
+  end
+end
+
+' ============================================================================
+' S6 — Close audit cycle and return outcome
+' ============================================================================
+group S6 "GRP_AUDIT_CLOSE_OUTCOME"
+  CC_APLM --> CC_FACADE : [step=S6.1r]\n[vals result.outcome=ok; result.ok=AuditCycleOutcome(state=<audit_cleared|audit_retry_pending|proof_pending|degraded>; packages_remaining=<n>; proof_status=<completed|pending|skipped>)]
+  deactivate CC_APLM
+end
+
+@enduml

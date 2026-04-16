@@ -1,13 +1,6 @@
 namespace OpenFiscalCore.System.Domains.ESDC.Types.Primitives;
 
-public readonly record struct PinTriesLeft
+public readonly record struct PinTriesLeft(byte Value)
 {
-    public PinTriesLeft(byte value)
-    {
-        Value = value;
-    }
-
-    public byte Value { get; }
-
     public override string ToString() => Value.ToString();
 }

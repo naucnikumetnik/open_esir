@@ -1,0 +1,63 @@
+@startuml
+title Evaluate recovery needs — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "StatusAndOperatorRecoveryManager" as CC_SRM <<component>>
+end box
+
+note over CC_SRM #FFF8DC
+S_LEAF_ESDC_EVALUATE_RECOVERY_NEEDS
+parent_ref: S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER / GRP_STATUS_EVALUATE
+behavior_ref: B_ESDC_STATUS_EVALUATE_RECOVERY
+end note
+
+note over CC_SRM
+  After probing availability, the manager evaluates which
+  recovery action (if any) is required before fiscalization
+  can proceed. Evaluation checks audit-required flag,
+  PIN-required flag, time validity, and certificate validity
+  in priority order. The first blocking condition wins.
+end note
+
+' ============================================================================
+' S1 — Read current status flags
+' ============================================================================
+group S1 "GRP_EVALUATE_READ_FLAGS"
+  CC_SRM -> CC_SRM : read StatusResponse flags from cached state\n[step=S1.1]\n[vals isPinRequired=<bool>; auditRequired=<bool>; sdcDateTime=<datetime>; uid=<se_uid>; gsc=<general_status_code>]
+  CC_SRM -> CC_SRM : read probe results (cert_valid, time_sync_ok)\n[step=S1.2]
+end
+
+' ============================================================================
+' S2 — Evaluate in priority order
+' ============================================================================
+group S2 "GRP_EVALUATE_PRIORITY"
+
+  alt [COND=auditRequired == true]
+    CC_SRM -> CC_SRM : audit cycle must complete before fiscalization\n[step=S2.1a]\n[vals recovery_action=audit_required; blocking=true]
+
+  else [COND=isPinRequired == true]
+    CC_SRM -> CC_SRM : operator must provide PIN to unlock SE session\n[step=S2.1b]\n[vals recovery_action=pin_verify; blocking=true]
+
+  else [COND=time_sync_ok == false]
+    CC_SRM -> CC_SRM : time desynchronization blocks fiscalization\n[step=S2.1c]\n[vals recovery_action=degraded; reason=time_desynchronized]
+
+  else [COND=cert_valid == false]
+    CC_SRM -> CC_SRM : certificate degradation blocks fiscalization\n[step=S2.1d]\n[vals recovery_action=degraded; reason=certificate_expired]
+
+  else [COND=all checks passed]
+    CC_SRM -> CC_SRM : no recovery needed — system ready\n[step=S2.1e]\n[vals recovery_action=none; ready=true]
+
+  end
+
+end
+
+@enduml

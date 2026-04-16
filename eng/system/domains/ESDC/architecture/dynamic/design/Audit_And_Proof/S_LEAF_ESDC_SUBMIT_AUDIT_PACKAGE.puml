@@ -1,0 +1,91 @@
+@startuml
+title Submit pending audit package — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+  control "TaxCoreEsdcBackendAdapter" as CC_TBA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control "TaxCore Backend\n(E-SDC API)" as EXT_TCB <<external>>
+end box
+
+note over CC_APLM, EXT_TCB #FFF8DC
+S_LEAF_ESDC_SUBMIT_AUDIT_PACKAGE
+parent_ref: S_CMP_ESDC_AUDIT_AND_PROOF_MASTER / GRP_AUDIT_SUBMIT
+behavior_ref: B_ESDC_AUDIT_AND_PROOF_SUBMIT_PACKAGE
+end note
+
+note over CC_APLM, CC_TBA
+  AuditPackages are submitted to TaxCore Backend individually.
+  Each submission returns an AuditDataStatus containing the backend's
+  decision plus optional piggy-backed commands. Commands received
+  through audit responses are applied and acknowledged inline.
+end note
+
+' ============================================================================
+' S1 — Submit backlog loop
+' ============================================================================
+group S1 "GRP_SUBMIT_LOOP"
+  loop [COND=for each pending AuditPackage in backlog]
+
+    CC_APLM -> CC_TBA : IF_CMP_ESDC_TAXCORE_ESDC_BACKEND.submitAuditPackage(pkg:AuditPackage) -> Result[AuditDataStatus]\n[step=S1.1]\n[connection use_port=P_APLM_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TBA_PROV_TAXCORE_ESDC_BACKEND; conn=C_APLM__TBA__TAXCORE_ESDC_BACKEND]\n[vals packageId=<pkg.id>; ordinal=<pkg.ordinal>]
+    activate CC_TBA
+    CC_TBA -> EXT_TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditPackage(data:AuditPackage) -> AuditDataStatus\n[step=S1.2]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-401 · HTTPS POST /api/v3/sdc/audit · TaxCoreAuthenticationToken]
+    activate EXT_TCB
+    EXT_TCB --> CC_TBA : [step=S1.2r]\n[vals result=AuditDataStatus(status, commands[])]
+    deactivate EXT_TCB
+    CC_TBA --> CC_APLM : [step=S1.1r]\n[vals audit_status=<status>; returned_commands=<Command[]>]
+    deactivate CC_TBA
+
+    ' ========================================================================
+    ' S2 — Record audit status per package
+    ' ========================================================================
+    CC_APLM -> CC_APLM : record audit disposition for package\n[step=S2.1]\n[vals packageId=<pkg.id>; status=<verified_delete_local|retryable|hold_non_retryable>]\n[store_write entity=E_AUDIT_BACKLOG_INDEX; pattern_ref=AP_CMP_EVOLVE_AUDIT_BACKLOG]\n[invariant_ref=INV_APS_002 — deletion only on backend status 4; INV_APS_003 — retry only on status 1]
+
+    ' ========================================================================
+    ' S3 — Process returned commands (if any)
+    ' ========================================================================
+    alt [COND=returned_commands non-empty]
+      group S3 "GRP_SUBMIT_PROCESS_RETURNED_COMMANDS"
+        loop [COND=for each returned command]
+          CC_APLM -> CC_APLM : apply command payload\n[step=S3.1]\n[vals commandId=<cmd.commandId>; command_type=<cmd.type>]
+
+          alt [COND=command applied successfully]
+            CC_APLM -> CC_TBA : IF_CMP_ESDC_TAXCORE_ESDC_BACKEND.notifyCommandProcessed(commandId:string, outcome:bool) -> Result[void]\n[step=S3.2a]\n[connection use_port=P_APLM_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TBA_PROV_TAXCORE_ESDC_BACKEND; conn=C_APLM__TBA__TAXCORE_ESDC_BACKEND]
+            activate CC_TBA
+            CC_TBA -> EXT_TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId, body:true)\n[step=S3.3a]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-402 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+            activate EXT_TCB
+            EXT_TCB --> CC_TBA : [step=S3.3ar]
+            deactivate EXT_TCB
+            CC_TBA --> CC_APLM : [step=S3.2ar]
+            deactivate CC_TBA
+
+          else [COND=command application failed]
+            CC_APLM -> CC_TBA : IF_CMP_ESDC_TAXCORE_ESDC_BACKEND.notifyCommandProcessed(commandId:string, outcome:bool) -> Result[void]\n[step=S3.2e]\n[connection use_port=P_APLM_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TBA_PROV_TAXCORE_ESDC_BACKEND; conn=C_APLM__TBA__TAXCORE_ESDC_BACKEND]
+            activate CC_TBA
+            CC_TBA -> EXT_TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId, body:false)\n[step=S3.3e]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-402 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+            activate EXT_TCB
+            EXT_TCB --> CC_TBA : [step=S3.3er]
+            deactivate EXT_TCB
+            CC_TBA --> CC_APLM : [step=S3.2er]
+            deactivate CC_TBA
+            CC_APLM -> CC_APLM : mark command outcome pending review\n[step=S3.4e]
+          end
+        end
+      end
+    end
+
+  end
+end
+
+@enduml

@@ -1,0 +1,60 @@
+@startuml
+title Validate and prepare invoice request — ESIR domain
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsirFacade)" as CC_FACADE
+
+box "ESIR — Internal Components" #F3F3F3
+  control "InvoiceRequestValidation" as CC_VAL <<component>>
+end box
+
+note over CC_FACADE, CC_VAL #FFF8DC
+S_CMP_ESIR_VALIDATE_AND_PREPARE_REQUEST_MASTER
+dynamic_view_ref: S_SYS_FISCALIZE_INVOICE / GRP_FISCALIZE_VALIDATE_AND_PREPARE_REQUEST
+state_machine_ref: SM_SYS_ESIR_FISCALIZATION / ST_ESIR_FISCALIZATION_VALIDATING_AND_PREPARING
+behavior_ref: B_ESIR_FISCALIZATION_VALIDATE_REQUEST, B_ESIR_FISCALIZATION_PREPARE_RECEIPT
+end note
+
+note over CC_VAL
+  InvoiceRequestValidation is a pure-function component: no external
+  dependencies. It validates the InvoiceRequest against the fiscal
+  catalog and cached tax rates, then normalizes structural fields.
+
+  Internal pipeline (collapsed — no inter-component calls):
+    1. Validate invoice fields (invoiceType, transactionType, dateTimeCreated,
+       cashier, invoiceNumber, items[], item-level labels vs tax rates)
+    2. Validate buyer/reference data (buyerId format per codebook,
+       costCenterId, referentDocumentNumber/DT when transaction type requires)
+    3. Validate payments and totals (payment[] non-empty, PaymentType enum,
+       item sum == totalAmount, payment sum >= totalAmount, tax label consistency)
+    4. Normalize (compute derived fields, normalize datetimes, trim strings,
+       assemble final PreparedInvoiceRequest)
+  First validation failure stops the pipeline.
+end note
+
+' ============================================================================
+' S1 — Facade delegates validation and preparation
+' ============================================================================
+group S1 "GRP_VALIDATE_AND_PREPARE"
+  CC_FACADE -> CC_VAL : IF_CMP_ESIR_INVOICE_REQUEST_VALIDATION.validateAndPrepare(request:InvoiceRequest, taxRates:TaxRatesResponse) -> Result[PreparedInvoiceRequest]\n[step=S1.1]\n[vals request=<InvoiceRequest>; taxRates=<current_tax_rates>]
+  activate CC_VAL
+
+  alt [COND=VALIDATION_FAILED (field, buyer, payment, or total violation)]
+    CC_VAL --> CC_FACADE : [step=S1.1err]\n[vals result.outcome=err; result.err.code=VALIDATION_FAILED; result.err.errors=ValidationErrorResponse[](field_path, error_code, message)]
+    deactivate CC_VAL
+
+  else [COND=VALID — all stages passed, request normalized]
+    CC_VAL --> CC_FACADE : [step=S1.1r]\n[vals result.outcome=ok; result.ok=PreparedInvoiceRequest(normalized_fields, computed_totals, tax_breakdown)]
+    deactivate CC_VAL
+  end
+end
+
+@enduml

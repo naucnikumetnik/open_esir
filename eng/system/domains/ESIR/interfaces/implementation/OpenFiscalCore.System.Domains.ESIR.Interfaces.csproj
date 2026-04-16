@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OpenFiscalCore.System.Domains.ESIR.Interfaces</AssemblyName>
+    <RootNamespace>OpenFiscalCore.System.Domains.ESIR.Interfaces</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../types/implementation/OpenFiscalCore.System.Types.csproj" />
+    <ProjectReference Include="../../../ESDC/types/implementation/OpenFiscalCore.System.Domains.ESDC.Types.csproj" />
+    <ProjectReference Include="../../types/implementation/OpenFiscalCore.System.Domains.ESIR.Types.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,58 @@
+@startuml
+title Persist local audit evidence — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "LocalFiscalizationEngine" as CC_LFE <<component>>
+end box
+
+note over CC_LFE #FFF8DC
+S_LEAF_ESDC_PERSIST_LOCAL_EVIDENCE
+parent_ref: S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER / GRP_LOCAL_FISC_PERSIST_EVIDENCE
+guard_ref: G_ESDC_LOCAL_FISCALIZATION_LOCAL_EVIDENCE_REQUIRED
+behavior_ref: B_ESDC_LOCAL_FISCALIZATION_PERSIST_LOCAL_EVIDENCE
+storage_ref: DV_SYS_OPEN_FISCAL_CORE_RUNTIME_STORE_AUDIT_AND_PROOF / ST_AUDIT_EVIDENCE_STATE
+end note
+
+note over CC_LFE
+  Local evidence persistence is part of the success path,
+  not a best-effort side effect. Persistence failure
+  fails the entire fiscalization request.
+
+  The AuditPackage is stored in local non-volatile storage
+  and remains until proof-of-audit is obtained.
+end note
+
+' ============================================================================
+' S1 — Compose AuditPackage from signed result
+' ============================================================================
+group S1 "GRP_EVIDENCE_COMPOSE_AUDIT_PACKAGE"
+  CC_LFE -> CC_LFE : compose AuditPackage from InvoiceRequest, SignInvoiceApduResponse,\nand InvoiceResult metadata\n[step=S1.1]\n[vals audit_package=<AuditPackage(invoiceData, signature, counter, sdcDateTime)>]
+  CC_LFE -> CC_LFE : assign audit package ordinal from local counter sequence\n[step=S1.2]\n[vals ordinal=<next_audit_ordinal>; se_uid=<active_SE_UID>]
+end
+
+' ============================================================================
+' S2 — Persist to local non-volatile storage
+' ============================================================================
+group S2 "GRP_EVIDENCE_PERSIST_TO_STORAGE"
+  CC_LFE -> CC_LFE : write AuditPackage to local audit evidence store\n[step=S2.1]\n[vals storage_path=<audit_backlog/{se_uid}/{ordinal}.json>]
+
+  alt [COND=write failed]
+    CC_LFE -> CC_LFE : evidence persistence failed\n[step=S2.2e]\n[vals evidence_persisted=false; error=local_evidence_persistence_failed]
+
+  else [COND=write succeeded]
+    CC_LFE -> CC_LFE : update local audit backlog state\n[step=S2.3]\n[vals backlog_count=<incremented>]
+    CC_LFE -> CC_LFE : update fiscal continuity counter\n[step=S2.4]\n[vals counter_state=<updated>]
+    CC_LFE -> CC_LFE : evidence persisted successfully\n[step=S2.5]\n[vals evidence_persisted=true]
+  end
+end
+
+@enduml

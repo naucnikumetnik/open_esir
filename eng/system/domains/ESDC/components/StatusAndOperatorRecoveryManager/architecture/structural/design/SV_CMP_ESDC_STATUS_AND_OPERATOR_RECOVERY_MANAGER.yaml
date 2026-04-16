@@ -1,0 +1,69 @@
+artifact_kind: structural_view
+schema_version: '0.2'
+card:
+  id: SV_CMP_ESDC_STATUS_AND_OPERATOR_RECOVERY_MANAGER
+  name: StatusAndOperatorRecoveryManager — component structural view
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-structural
+  level: component
+  scope: Unit decomposition of CC_SRM showing probe orchestration, recovery evaluation, and PIN management.
+  purpose: Define stable unit boundaries inside StatusAndOperatorRecoveryManager to prevent naming drift across S_UNIT_ diagrams.
+traceability:
+  parent_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  parent_component_ref: CC_SRM
+  related_dynamic_view_refs:
+  - S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER
+  - S_LEAF_ESDC_PROBE_AVAILABILITY
+  - S_LEAF_ESDC_EVALUATE_RECOVERY_NEEDS
+  - S_LEAF_ESDC_RECOVER_PIN
+units:
+- id: U_SRM_PROBE_ORCHESTRATOR
+  name: ProbeOrchestrator
+  responsibility: >
+    Runs the composite availability probe sequence: verifies internal
+    runtime health (S1), delegates SE presence check to CC_SEA (S2),
+    reads SE certificate expiration and flags degradation (S3), compares
+    sdcDateTime with system clock for time sync (S4), and derives the
+    composite availability result from all probe flags (S5).
+  key_operations:
+  - verifyRuntimeHealth() -> bool
+  - checkCertificateExpiration(cachedState) -> CertCheckResult
+  - checkTimeSync(sdcDateTime, systemClock, threshold) -> TimeSyncResult
+  - deriveAvailability(probeFlags) -> AvailabilityResult
+- id: U_SRM_RECOVERY_EVALUATOR
+  name: RecoveryEvaluator
+  responsibility: >
+    Reads current state flags snapshot (S1) and applies priority-ordered
+    evaluation (S2): auditRequired > isPinRequired > time_desync >
+    cert_degraded > none, to determine which recovery action (if any)
+    the facade should trigger.
+  key_operations:
+  - readStateFlags() -> StateSnapshot
+  - evaluateRecoveryPriority(snapshot) -> RecoveryAction
+- id: U_SRM_PIN_MANAGER
+  name: PinManager
+  responsibility: >
+    Manages PIN verification and SE session state: delegates verifyPin
+    to CC_SEA, unlocks active SE session and caches PIN context on
+    success (S2.3a), marks pending operator action on wrong PIN (S2.3e1),
+    marks SE permanently locked on retry exhaustion (S2.3e2).
+  key_operations:
+  - unlockSession(pinContext) -> void
+  - markPendingOperatorAction() -> void
+  - markSePermanentlyLocked() -> void
+unit_interfaces:
+- id: IF_U_SRM_PROBE_ORCHESTRATOR
+  name: Probe Orchestrator
+  provider_unit_ref: U_SRM_PROBE_ORCHESTRATOR
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER step S2)
+- id: IF_U_SRM_RECOVERY_EVALUATOR
+  name: Recovery Evaluator
+  provider_unit_ref: U_SRM_RECOVERY_EVALUATOR
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER step S3)
+- id: IF_U_SRM_PIN_MANAGER
+  name: PIN Manager
+  provider_unit_ref: U_SRM_PIN_MANAGER
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_STATUS_AND_RECOVERY_MASTER step S4)

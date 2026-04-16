@@ -1,0 +1,101 @@
+@startuml
+title Execute proof-of-audit cycle — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+  control "TaxCoreEsdcBackendAdapter" as CC_TBA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity  "SE\n(Security Element)" as EXT_SE <<external>>
+  control "TaxCore Backend\n(E-SDC API)" as EXT_TCB <<external>>
+end box
+
+note over CC_APLM, EXT_TCB #FFF8DC
+S_LEAF_ESDC_EXECUTE_PROOF_CYCLE
+parent_ref: S_CMP_ESDC_AUDIT_AND_PROOF_MASTER / GRP_PROOF_EXECUTE
+behavior_ref: B_ESDC_AUDIT_AND_PROOF_START_PROOF, B_ESDC_AUDIT_AND_PROOF_SUBMIT_PROOF
+end note
+
+note over CC_APLM, CC_SEA
+  Proof-of-audit cycle: the manager requests audit request data and
+  amount status from the SE via APDUs, then composes a ProofOfAuditRequest
+  and submits it to TaxCore Backend. This provides cryptographic evidence
+  that the SE has been operating correctly and that totals are consistent.
+end note
+
+' ============================================================================
+' S0 — Open proof cycle record
+' ============================================================================
+group S0 "GRP_PROOF_OPEN_CYCLE"
+  CC_APLM -> CC_APLM : open proof cycle record\n[step=S0.1]\n[vals proof_cycle_id=<new_cycle_id>; phase=started]\n[store_write entity=E_PROOF_CYCLE_RECORD; pattern_ref=AP_CMP_START_PROOF_CYCLE]
+end
+
+' ============================================================================
+' S1 — Start audit APDU: obtain audit request payload from SE
+' ============================================================================
+group S1 "GRP_PROOF_START_AUDIT"
+  CC_APLM -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.startAudit() -> Result[AuditRequestPayload]\n[step=S1.1]\n[connection use_port=P_APLM_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_APLM__SEA__SECURE_ELEMENT]
+  activate CC_SEA
+  CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.StartAuditApdu() -> AuditRequestPayload\n[step=S1.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+  activate EXT_SE
+  EXT_SE --> CC_SEA : [step=S1.2r]\n[vals result=AuditRequestPayload]
+  deactivate EXT_SE
+  CC_SEA --> CC_APLM : [step=S1.1r]\n[vals auditRequestPayload=<AuditRequestPayload>]
+  deactivate CC_SEA
+  CC_APLM -> CC_APLM : persist audit request payload\n[step=S1.3]\n[store_write entity=E_AUDIT_REQUEST_PAYLOAD_RECORD; pattern_ref=AP_CMP_START_PROOF_CYCLE]\n[invariant_ref=INV_APS_004 — AuditRequestPayload and ProofOfAuditRequest must remain distinct]
+end
+
+' ============================================================================
+' S2 — Amount status APDU: obtain cumulative totals from SE
+' ============================================================================
+group S2 "GRP_PROOF_AMOUNT_STATUS"
+  CC_APLM -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.getAmountStatus() -> Result[AmountStatusResponse]\n[step=S2.1]\n[connection use_port=P_APLM_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_APLM__SEA__SECURE_ELEMENT]
+  activate CC_SEA
+  CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.AmountStatusApdu() -> AmountStatusResponse\n[step=S2.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+  activate EXT_SE
+  EXT_SE --> CC_SEA : [step=S2.2r]\n[vals result=AmountStatusResponse(sum, limit)]
+  deactivate EXT_SE
+  CC_SEA --> CC_APLM : [step=S2.1r]\n[vals sum=<total_amount>; limit=<configured_limit>]
+  deactivate CC_SEA
+end
+
+' ============================================================================
+' S3 — Compose and submit ProofOfAuditRequest
+' ============================================================================
+group S3 "GRP_PROOF_COMPOSE_AND_SUBMIT"
+  CC_APLM -> CC_APLM : compose ProofOfAuditRequest from auditRequestPayload, sum, limit\n[step=S3.1]\n[vals proofRequest=ProofOfAuditRequest]
+  CC_APLM -> CC_APLM : persist proof-of-audit request (distinct from audit request payload)\n[step=S3.1a]\n[store_write entity=E_PROOF_OF_AUDIT_REQUEST_RECORD; pattern_ref=AP_CMP_COMPOSE_PROOF_REQUEST]\n[invariant_ref=INV_APS_004 — AuditRequestPayload and ProofOfAuditRequest must remain distinct]
+
+  CC_APLM -> CC_TBA : IF_CMP_ESDC_TAXCORE_ESDC_BACKEND.submitProofOfAudit(data:ProofOfAuditRequest) -> Result[void]\n[step=S3.2]\n[connection use_port=P_APLM_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TBA_PROV_TAXCORE_ESDC_BACKEND; conn=C_APLM__TBA__TAXCORE_ESDC_BACKEND]
+  activate CC_TBA
+  CC_TBA -> EXT_TCB : IF_DEP_TAXCORE_ESDC_BACKEND.SubmitAuditRequestPayload(data:ProofOfAuditRequest)\n[step=S3.3]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-403 · HTTPS POST /api/v3/sdc/audit-proof · TaxCoreAuthenticationToken]
+  activate EXT_TCB
+
+  alt [COND=HTTP 200 OK]
+    EXT_TCB --> CC_TBA : [step=S3.3r]\n[vals ack=true]
+    deactivate EXT_TCB
+    CC_TBA --> CC_APLM : [step=S3.2r]\n[vals submitted=true]
+    deactivate CC_TBA
+    CC_APLM -> CC_APLM : mark proof submitted, await backend proof command\n[step=S3.4]\n[vals proof_submitted=true]\n[store_write entity=E_PROOF_CYCLE_RECORD; phase=submitted]
+
+  else [COND=network error or HTTP error]
+    EXT_TCB --> CC_TBA : [step=S3.3e]\n[vals error=<network_error|http_error>]
+    deactivate EXT_TCB
+    CC_TBA --> CC_APLM : [step=S3.2e]\n[vals submitted=false; reason=<transient_error>]
+    deactivate CC_TBA
+    CC_APLM -> CC_APLM : retain proof obligation for next cycle\n[step=S3.4e]\n[vals proof_pending=true]\n[store_write entity=E_PROOF_CYCLE_RECORD; phase=retry_pending]
+  end
+end
+
+@enduml

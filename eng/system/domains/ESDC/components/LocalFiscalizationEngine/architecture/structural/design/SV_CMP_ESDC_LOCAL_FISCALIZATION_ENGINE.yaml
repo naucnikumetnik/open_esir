@@ -1,0 +1,88 @@
+artifact_kind: structural_view
+schema_version: '0.2'
+card:
+  id: SV_CMP_ESDC_LOCAL_FISCALIZATION_ENGINE
+  name: LocalFiscalizationEngine — component structural view
+  system_of_interest: Open Fiscal Core
+  viewpoint_ref: VP-structural
+  level: component
+  scope: Unit decomposition of CC_LFE showing request validation, sign input building, result assembly, and evidence persistence.
+  purpose: Define stable unit boundaries inside LocalFiscalizationEngine to prevent naming drift across S_UNIT_ diagrams.
+traceability:
+  parent_structural_view_ref: SV_SYS_OPEN_FISCAL_CORE
+  parent_component_ref: CC_LFE
+  related_dynamic_view_refs:
+  - S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER
+  - S_LEAF_ESDC_ACCEPT_AND_VERIFY_REQUEST
+  - S_LEAF_ESDC_PREPARE_SIGN_INPUT
+  - S_LEAF_ESDC_INVOKE_SIGNING_AND_BUILD_RESULT
+  - S_LEAF_ESDC_PERSIST_LOCAL_EVIDENCE
+units:
+- id: U_LFE_REQUEST_VALIDATOR
+  name: RequestValidator
+  responsibility: >
+    Validates incoming InvoiceRequest structure against fiscal catalog
+    rules: field presence/format (S1), tax label resolution against
+    current rates (S2), local precondition checks — certificate validity
+    and bootstrap state (S3), and final acceptance decision (S4).
+  key_operations:
+  - validateStructure(request) -> Result[void]
+  - determineTaxHandling(request, taxRates) -> Result[TaxBreakdown]
+  - checkLocalPreconditions(certContext, bootstrapState) -> Result[void]
+  - confirmAcceptance() -> AcceptanceDecision
+- id: U_LFE_SIGN_INPUT_BUILDER
+  name: SignInputBuilder
+  responsibility: >
+    Serializes invoice data into the SE-expected binary format: header,
+    items, payments, buyer, referent document, and totals sub-sections (S1),
+    composes the APDU command (CLA 0x88, INS 0x13) (S2), and validates
+    payload size and completeness (S3).
+  key_operations:
+  - serializeInvoiceData(request) -> byte[]
+  - composeSignApdu(serializedData) -> ApduCommand
+  - validateSignInput(apdu) -> Result[void]
+- id: U_LFE_RESULT_BUILDER
+  name: ResultBuilder
+  responsibility: >
+    Assembles the final InvoiceResult after SE signing: composes the
+    verification URL from signed data and environment config (S2),
+    composes the textual journal for receipt printing (S3), and
+    assembles the complete InvoiceResult (S4).
+  key_operations:
+  - composeVerificationUrl(signedData, envConfig) -> VerificationUrl
+  - composeTextualJournal(invoiceData, signature, counter, dateTime) -> string
+  - assembleInvoiceResult(signedData, url, journal) -> InvoiceResult
+- id: U_LFE_EVIDENCE_PERSISTER
+  name: EvidencePersister
+  responsibility: >
+    Builds the AuditPackage from fiscalization evidence, assigns the
+    next ordinal (S1), writes to persistent storage and updates
+    counters and audit backlog state (S2).
+  key_operations:
+  - composeAuditPackage(evidence) -> AuditPackage
+  - assignOrdinal(package) -> AuditPackage
+  - persistToStorage(package) -> void
+  store_writes:
+  - entity: E_AUDIT_PACKAGE
+    pattern_ref: AP_CMP_PERSIST_FISCAL_EVIDENCE
+unit_interfaces:
+- id: IF_U_LFE_REQUEST_VALIDATOR
+  name: Request Validator
+  provider_unit_ref: U_LFE_REQUEST_VALIDATOR
+  consumer_unit_refs:
+  - external (CC_FACADE via S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER step S2)
+- id: IF_U_LFE_SIGN_INPUT_BUILDER
+  name: Sign Input Builder
+  provider_unit_ref: U_LFE_SIGN_INPUT_BUILDER
+  consumer_unit_refs:
+  - external (orchestrated by S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER step S2)
+- id: IF_U_LFE_RESULT_BUILDER
+  name: Result Builder
+  provider_unit_ref: U_LFE_RESULT_BUILDER
+  consumer_unit_refs:
+  - external (orchestrated by S_LEAF_ESDC_INVOKE_SIGNING_AND_BUILD_RESULT)
+- id: IF_U_LFE_EVIDENCE_PERSISTER
+  name: Evidence Persister
+  provider_unit_ref: U_LFE_EVIDENCE_PERSISTER
+  consumer_unit_refs:
+  - external (orchestrated by S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER step S4)

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("OpenFiscalCore.System.Domains.ESIR.Types")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+382e5ab14df0599c692656802ec34250a9ac3946")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b0d6be0e68fa0b53dd9c6625e325960a8a879479")]
 [assembly: System.Reflection.AssemblyProductAttribute("OpenFiscalCore.System.Domains.ESIR.Types")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OpenFiscalCore.System.Domains.ESIR.Types")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

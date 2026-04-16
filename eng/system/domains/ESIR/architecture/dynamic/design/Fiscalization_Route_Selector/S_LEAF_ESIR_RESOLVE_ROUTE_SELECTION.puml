@@ -1,0 +1,81 @@
+@startuml
+title Resolve route selection from evaluation outcomes — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "FiscalizationRouteSelector" as CC_ROUTE <<component>>
+end box
+
+note over CC_ROUTE #FFF8DC
+S_LEAF_ESIR_RESOLVE_ROUTE_SELECTION
+parent_ref: S_CMP_ESIR_ROUTE_SELECTION_MASTER / GRP_ROUTE_RESOLVE_SELECTION
+behavior_ref: B_ESIR_FISCALIZATION_SELECT_ROUTE
+end note
+
+note over CC_ROUTE
+  Resolves fiscal route from online_allowed, local_allowed,
+  and configured fallback policy.
+
+  Policy modes:
+    PREFER_ONLINE  — online if available, local as fallback
+    PREFER_LOCAL   — local if available, online as fallback
+    V_SDC          — online only, no local fallback
+    E_SDC          — local only, no online fallback
+end note
+
+' ============================================================================
+' S1 — Determine resolution inputs
+' ============================================================================
+group S1 "GRP_RESOLVE_LOAD_INPUTS"
+  CC_ROUTE -> CC_ROUTE : load evaluation outcomes and configured policy\n[step=S1.1]\n[vals online_allowed=<bool>; local_allowed=<bool>; configuredMode=<V_SDC|E_SDC|PREFER_ONLINE|PREFER_LOCAL>]
+end
+
+' ============================================================================
+' S2 — Apply configured policy to derive route
+' ============================================================================
+group S2 "GRP_RESOLVE_APPLY_POLICY"
+
+  alt [COND=configuredMode == V_SDC]
+    alt [COND=online_allowed == true]
+      CC_ROUTE -> CC_ROUTE : resolve to ONLINE (V-SDC only mode)\n[step=S2.1a]\n[vals route_resolved=ONLINE]
+    else [COND=online_allowed == false]
+      CC_ROUTE -> CC_ROUTE : V-SDC only mode but online unavailable\n[step=S2.1e]\n[vals route_resolved=UNAVAILABLE; resolution_reason=online_required_but_unavailable]
+    end
+
+  else [COND=configuredMode == E_SDC]
+    alt [COND=local_allowed == true]
+      CC_ROUTE -> CC_ROUTE : resolve to LOCAL (E-SDC only mode)\n[step=S2.2a]\n[vals route_resolved=LOCAL]
+    else [COND=local_allowed == false]
+      CC_ROUTE -> CC_ROUTE : E-SDC only mode but local unavailable\n[step=S2.2e]\n[vals route_resolved=UNAVAILABLE; resolution_reason=local_required_but_unavailable]
+    end
+
+  else [COND=configuredMode == PREFER_ONLINE]
+    alt [COND=online_allowed == true]
+      CC_ROUTE -> CC_ROUTE : resolve to ONLINE (preferred and available)\n[step=S2.3a]\n[vals route_resolved=ONLINE]
+    else [COND=online_allowed == false and local_allowed == true]
+      CC_ROUTE -> CC_ROUTE : fallback to LOCAL (preferred online unavailable)\n[step=S2.3b]\n[vals route_resolved=LOCAL; resolution_reason=online_unavailable_fallback_to_local]
+    else [COND=online_allowed == false and local_allowed == false]
+      CC_ROUTE -> CC_ROUTE : both paths unavailable\n[step=S2.3e]\n[vals route_resolved=UNAVAILABLE; resolution_reason=both_paths_unavailable]
+    end
+
+  else [COND=configuredMode == PREFER_LOCAL]
+    alt [COND=local_allowed == true]
+      CC_ROUTE -> CC_ROUTE : resolve to LOCAL (preferred and available)\n[step=S2.4a]\n[vals route_resolved=LOCAL]
+    else [COND=local_allowed == false and online_allowed == true]
+      CC_ROUTE -> CC_ROUTE : fallback to ONLINE (preferred local unavailable)\n[step=S2.4b]\n[vals route_resolved=ONLINE; resolution_reason=local_unavailable_fallback_to_online]
+    else [COND=local_allowed == false and online_allowed == false]
+      CC_ROUTE -> CC_ROUTE : both paths unavailable\n[step=S2.4e]\n[vals route_resolved=UNAVAILABLE; resolution_reason=both_paths_unavailable]
+    end
+
+  end
+end
+
+@enduml

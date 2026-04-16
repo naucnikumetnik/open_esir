@@ -1,0 +1,121 @@
+@startuml
+title Local fiscalization — E-SDC domain master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "LocalFiscalizationEngine" as CC_LFE <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_FACADE, EXT_SE #FFF8DC
+S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER
+dynamic_view_ref: S_SYS_FISCALIZE_INVOICE / GRP_FISCALIZE_ROUTE_LOCAL
+state_machine_ref: SM_SYS_ESDC_LOCAL_FISCALIZATION
+end note
+
+note over CC_LFE
+  LocalFiscalizationEngine owns the synchronous local CreateInvoice flow.
+  SecureElementAdapter translates canonical signing operations to SE APDU commands.
+  The only inter-component boundary crossing in this flow is the SE signing call.
+end note
+
+' ============================================================================
+' S1 — Facade delegates local fiscalization
+' ============================================================================
+group S1 "GRP_LOCAL_FISC_RECEIVE_REQUEST"
+  CC_FACADE -> CC_LFE : IF_CMP_ESDC_LOCAL_FISCALIZATION.createInvoice(request:InvoiceRequest) -> Result[InvoiceResult]\n[step=S1.1]\n[vals request=<InvoiceRequest_prepared>]
+  activate CC_LFE
+end
+
+' ============================================================================
+' S2 — Accept, verify, and prepare signing input (internal to LFE)
+' ============================================================================
+group S2 "GRP_LOCAL_FISC_ACCEPT_AND_PREPARE"
+  note over CC_LFE
+    Accept and verify (collapsed — no inter-component calls):
+      - Verify InvoiceRequest structure and field completeness
+      - Verify invoiceType / transactionType supported for local fiscalization
+      - Resolve tax labels against cached tax rates
+      - Check SE certificate validity and E-SDC bootstrap state
+    guard_ref: G_ESDC_LOCAL_FISCALIZATION_REQUEST_ACCEPTABLE
+    behavior_ref: B_ESDC_LOCAL_FISCALIZATION_ACCEPT_REQUEST
+
+    Prepare SignInvoiceApduRequest (collapsed — no inter-component calls):
+      - Map InvoiceRequest fields → APDU payload (CLA=0x88, INS=0x13)
+      - Serialize header, items[], payments[], buyer data
+      - Compute totalAmount and tax breakdown
+      - Validate APDU payload size within SE maximum
+    guard_ref: G_ESDC_LOCAL_FISCALIZATION_SIGN_INPUT_READY
+    behavior_ref: B_ESDC_LOCAL_FISCALIZATION_PREPARE_SIGN_INPUT
+  end note
+
+  alt [COND=REQUEST_REJECTED or SIGN_INPUT_INVALID]
+    CC_LFE --> CC_FACADE : [step=S2.1err]\n[vals result.outcome=err; result.err.code=<VALIDATION_FAILED|PRECONDITION_FAILED|SIGN_INPUT_INVALID>]
+    deactivate CC_LFE
+  end
+end
+
+' ============================================================================
+' S3 — Invoke SE signing and build invoice result (inter-component)
+' ============================================================================
+group S3 "GRP_LOCAL_FISC_SIGN_AND_BUILD"
+  ref over CC_LFE, CC_SEA, EXT_SE
+    expand=S_LEAF_ESDC_INVOKE_SIGNING_AND_BUILD_RESULT
+    ref_mode=call_return
+    behavior_ref=B_ESDC_LOCAL_FISCALIZATION_INVOKE_SIGNING, B_ESDC_LOCAL_FISCALIZATION_BUILD_RESULT
+  end ref
+
+  alt [COND=SIGNING_FAILED]
+    CC_LFE --> CC_FACADE : [step=S3.1err]\n[vals result.outcome=err; result.err.code=SE_SIGNING_FAILED; result.err.sw=<apdu_status>]
+    deactivate CC_LFE
+  end
+end
+
+' ============================================================================
+' S4 — Persist local audit evidence (internal to LFE)
+' ============================================================================
+group S4 "GRP_LOCAL_FISC_PERSIST_EVIDENCE"
+  note over CC_LFE
+    Persist local evidence (collapsed — no inter-component calls):
+      - Advance E_INVOICE_COUNTER_STATE and E_TRANSACTION_COUNTER_STATE
+      - Compose AuditPackage (key, iv, payload — canonical shape per SR_SYS_008)
+      - Assign ordinal from fiscal continuity counter
+      - Append E_LOCAL_JOURNAL_RECORD to ST_AUDIT_EVIDENCE_STATE
+      - Append E_AUDIT_PACKAGE_RECORD to ST_AUDIT_EVIDENCE_STATE
+      - Counter advance + evidence append must be atomic (INV_LFS_002)
+      - VerificationUrl stored as evidence enrichment, not runtime dependency (SR_SYS_009)
+    guard_ref: G_ESDC_LOCAL_FISCALIZATION_LOCAL_EVIDENCE_REQUIRED
+    behavior_ref: B_ESDC_LOCAL_FISCALIZATION_PERSIST_LOCAL_EVIDENCE
+    pattern_ref: AP_CMP_LOCAL_FISCALIZE
+    Persistence failure = fiscalization failure.
+  end note
+
+  alt [COND=EVIDENCE_PERSIST_FAILED]
+    CC_LFE --> CC_FACADE : [step=S4.1err]\n[vals result.outcome=err; result.err.code=LOCAL_EVIDENCE_PERSISTENCE_FAILED]
+    deactivate CC_LFE
+  end
+end
+
+' ============================================================================
+' S5 — Return successful result
+' ============================================================================
+group S5 "GRP_LOCAL_FISC_RETURN_RESULT"
+  CC_LFE --> CC_FACADE : [step=S5.1r]\n[vals result.outcome=ok; result.ok=InvoiceResult(invoiceNumber, verificationUrl, journal)]
+  deactivate CC_LFE
+end
+
+@enduml

@@ -2,6 +2,7 @@ using System.IO;
 using OpenFiscalCore.System.Domains.ESDC.Types.Primitives;
 using OpenFiscalCore.System.Domains.ESDC.Types.SecureElement;
 using OpenFiscalCore.System.Interfaces.External;
+using OpenFiscalCore.System.Types.Primitives;
 
 namespace OpenFiscalCore.System.Integration.Adapters;
 
@@ -45,6 +46,56 @@ public sealed class SecureElementApduAdapter : ISecureElementDependency
             SecureElementApduCodec.BuildEndAuditCommand(proof),
             static _ => true);
     }
+
+    public LastSignedInvoiceResponse GetLastSignedInvoiceApdu() =>
+        ExecuteCommand(
+            nameof(GetLastSignedInvoiceApdu),
+            SecureElementApduCodec.BuildGetLastSignedInvoiceCommand(),
+            SecureElementApduCodec.ParseLastSignedInvoiceResponse);
+
+    public SecureElementVersionResponse GetSecureElementVersion() =>
+        ExecuteCommand(
+            nameof(GetSecureElementVersion),
+            SecureElementApduCodec.BuildGetSecureElementVersionCommand(),
+            SecureElementApduCodec.ParseSecureElementVersionResponse);
+
+    public SecureElementCertParamsResponse GetCertParams() =>
+        ExecuteCommand(
+            nameof(GetCertParams),
+            SecureElementApduCodec.BuildGetCertParamsCommand(),
+            SecureElementApduCodec.ParseCertParamsResponse);
+
+    public void ForwardSecureElementDirective(ForwardSecureElementDirectiveRequest request)
+    {
+        _ = ExecuteCommand(
+            nameof(ForwardSecureElementDirective),
+            SecureElementApduCodec.BuildForwardDirectiveCommand(request),
+            static _ => true);
+    }
+
+    public PinTriesLeft GetPinTriesLeft() =>
+        ExecuteCommand(
+            nameof(GetPinTriesLeft),
+            SecureElementApduCodec.BuildGetPinTriesLeftCommand(),
+            SecureElementApduCodec.ParsePinTriesLeftResponse);
+
+    public ExportedCertificateDer ExportCertificateApdu() =>
+        ExecutePkiCommand(
+            nameof(ExportCertificateApdu),
+            SecureElementApduCodec.BuildExportCertificateCommand(),
+            SecureElementApduCodec.ParseExportCertificateResponse);
+
+    public TaxCorePublicKey ExportTaxCorePublicKeyApdu() =>
+        ExecuteCommand(
+            nameof(ExportTaxCorePublicKeyApdu),
+            SecureElementApduCodec.BuildExportTaxCorePublicKeyCommand(),
+            SecureElementApduCodec.ParseExportTaxCorePublicKeyResponse);
+
+    public ExportedAuditData ExportAuditDataApdu() =>
+        ExecuteCommand(
+            nameof(ExportAuditDataApdu),
+            SecureElementApduCodec.BuildExportAuditDataCommand(),
+            SecureElementApduCodec.ParseExportAuditDataResponse);
 
     private T ExecuteCommand<T>(
         string operationName,
@@ -122,6 +173,61 @@ public sealed class SecureElementApduAdapter : ISecureElementDependency
                 operationName,
                 ExternalDependencyFailureKind.Device,
                 "The secure-element transport failed while transmitting an APDU command.",
+                exception);
+        }
+    }
+
+    private T ExecutePkiCommand<T>(
+        string operationName,
+        ReadOnlyMemory<byte> command,
+        Func<ReadOnlyMemory<byte>, T> parseResponse)
+    {
+        try
+        {
+            var selectPkiCommand = SecureElementApduCodec.BuildSelectPkiAppletCommand(_config.PkiApplicationIdHex);
+            _ = Transmit(selectPkiCommand, $"{operationName}.SelectPkiApplet");
+
+            var payload = Transmit(command, operationName);
+            return parseResponse(payload);
+        }
+        catch (ExternalDependencyFailureException)
+        {
+            throw;
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new ExternalDependencyFailureException(
+                DependencyName,
+                operationName,
+                ExternalDependencyFailureKind.Protocol,
+                "The secure element returned an unexpected APDU payload.",
+                exception);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new ExternalDependencyFailureException(
+                DependencyName,
+                operationName,
+                ExternalDependencyFailureKind.Protocol,
+                "The APDU payload could not be mapped to the canonical contract.",
+                exception);
+        }
+        catch (FormatException exception)
+        {
+            throw new ExternalDependencyFailureException(
+                DependencyName,
+                operationName,
+                ExternalDependencyFailureKind.Configuration,
+                "The secure-element adapter configuration is invalid.",
+                exception);
+        }
+        catch (OverflowException exception)
+        {
+            throw new ExternalDependencyFailureException(
+                DependencyName,
+                operationName,
+                ExternalDependencyFailureKind.Protocol,
+                "The APDU payload exceeded the supported canonical bounds.",
                 exception);
         }
     }

@@ -1,0 +1,102 @@
+@startuml
+title Write export artifacts to removable media — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+  control "RemovableMediaAdapter" as CC_RMA <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  storage "Removable Media\n(SD Card / USB)" as EXT_MEDIA <<external>>
+  entity  "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_FACADE, EXT_SE #FFF8DC
+S_LEAF_ESDC_WRITE_EXPORT_ARTIFACTS
+parent_ref: S_CMP_ESDC_LOCAL_AUDIT_EXPORT_MASTER / GRP_LOCAL_EXPORT_WRITE
+behavior_ref: B_ESDC_LOCAL_AUDIT_EXPORT_WRITE_MEDIA
+end note
+
+note over CC_RMA, CC_APLM
+  Writes each pending audit package as a JSON file and optionally
+  generates an ARP file via the SE. Exported packages remain in
+  local non-volatile storage — they are not deleted by the export.
+  The local backlog is only cleared when proof-of-audit succeeds.
+end note
+
+' ============================================================================
+' S1 — Ensure media folder structure
+' ============================================================================
+group S1 "GRP_WRITE_ENSURE_FOLDER"
+  CC_FACADE -> CC_RMA : IF_CMP_ESDC_REMOVABLE_MEDIA.ensureExportFolder(seUid:string) -> Result[void]\n[step=S1.1]\n[connection use_port=P_FACADE_USE_REMOVABLE_MEDIA; prov_port=P_RMA_PROV_REMOVABLE_MEDIA; conn=C_FACADE__RMA__REMOVABLE_MEDIA]
+  activate CC_RMA
+  CC_RMA -> EXT_MEDIA : IF_DEP_REMOVABLE_MEDIA_IO.ensureDirectory(path:string) -> Result[void]\n[step=S1.2]\n[connection use_port=P_ESDC_USE_REMOVABLE_MEDIA_IO; prov_port=P_MEDIA_PROV_REMOVABLE_MEDIA_IO; conn=C_ESDC__MEDIA__REMOVABLE_MEDIA_IO]
+  activate EXT_MEDIA
+  EXT_MEDIA --> CC_RMA : [step=S1.2r]\n[vals folder_ready=true]
+  deactivate EXT_MEDIA
+  CC_RMA --> CC_FACADE : [step=S1.1r]
+  deactivate CC_RMA
+end
+
+' ============================================================================
+' S2 — Write audit package files
+' ============================================================================
+group S2 "GRP_WRITE_AUDIT_PACKAGES"
+  CC_FACADE -> CC_APLM : IF_CMP_ESDC_AUDIT_AND_PROOF.getExportPackages() -> Result[AuditPackage[]]\n[step=S2.1]\n[connection use_port=P_FACADE_USE_AUDIT_AND_PROOF; prov_port=P_APLM_PROV_AUDIT_AND_PROOF; conn=C_FACADE__APLM__AUDIT_AND_PROOF]
+  activate CC_APLM
+  CC_APLM --> CC_FACADE : [step=S2.1r]\n[vals packages=AuditPackage[]]
+  deactivate CC_APLM
+
+  loop [COND=for each AuditPackage in export set]
+    CC_FACADE -> CC_RMA : IF_CMP_ESDC_REMOVABLE_MEDIA.writeAuditPackage(pkg:AuditPackage, seUid:string) -> Result[bool]\n[step=S2.2]\n[connection use_port=P_FACADE_USE_REMOVABLE_MEDIA; prov_port=P_RMA_PROV_REMOVABLE_MEDIA; conn=C_FACADE__RMA__REMOVABLE_MEDIA]\n[vals filename={UID}/{UID}-{UID}-{Ordinal_Number}.json]
+    activate CC_RMA
+    CC_RMA -> EXT_MEDIA : IF_DEP_REMOVABLE_MEDIA_IO.writeFile(path:string, content:bytes) -> Result[void]\n[step=S2.3]\n[connection use_port=P_ESDC_USE_REMOVABLE_MEDIA_IO; prov_port=P_MEDIA_PROV_REMOVABLE_MEDIA_IO; conn=C_ESDC__MEDIA__REMOVABLE_MEDIA_IO]\n[vals path=<filename>; content=<audit_package_json>]
+    activate EXT_MEDIA
+    EXT_MEDIA --> CC_RMA : [step=S2.3r]\n[vals written=true]
+    deactivate EXT_MEDIA
+    CC_RMA --> CC_FACADE : [step=S2.2r]\n[vals written=true]
+    deactivate CC_RMA
+  end
+end
+
+' ============================================================================
+' S3 — Optionally generate and write ARP file
+' ============================================================================
+alt [COND=arp_required]
+  group S3 "GRP_WRITE_ARP"
+    CC_FACADE -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.startAudit() -> Result[AuditRequestPayload]\n[step=S3.1]\n[connection use_port=P_FACADE_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_FACADE__SEA__SECURE_ELEMENT]
+    activate CC_SEA
+    CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.StartAuditApdu() -> AuditRequestPayload\n[step=S3.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+    activate EXT_SE
+    EXT_SE --> CC_SEA : [step=S3.2r]\n[vals result=AuditRequestPayload]
+    deactivate EXT_SE
+    CC_SEA --> CC_FACADE : [step=S3.1r]\n[vals arp=AuditRequestPayload]
+    deactivate CC_SEA
+
+    CC_FACADE -> CC_RMA : IF_CMP_ESDC_REMOVABLE_MEDIA.writeArpFile(arp:AuditRequestPayload, seUid:string) -> Result[bool]\n[step=S3.3]\n[connection use_port=P_FACADE_USE_REMOVABLE_MEDIA; prov_port=P_RMA_PROV_REMOVABLE_MEDIA; conn=C_FACADE__RMA__REMOVABLE_MEDIA]
+    activate CC_RMA
+    CC_RMA -> EXT_MEDIA : IF_DEP_REMOVABLE_MEDIA_IO.writeFile(path:string, content:bytes) -> Result[void]\n[step=S3.4]\n[connection use_port=P_ESDC_USE_REMOVABLE_MEDIA_IO; prov_port=P_MEDIA_PROV_REMOVABLE_MEDIA_IO; conn=C_ESDC__MEDIA__REMOVABLE_MEDIA_IO]\n[vals path=<se_uid>/<se_uid>.arp; content=<arp_bytes>]
+    activate EXT_MEDIA
+    EXT_MEDIA --> CC_RMA : [step=S3.4r]\n[vals written=true]
+    deactivate EXT_MEDIA
+    CC_RMA --> CC_FACADE : [step=S3.3r]\n[vals arp_written=true]
+    deactivate CC_RMA
+  end
+
+else [COND=arp not required]
+  CC_FACADE -> CC_FACADE : continue without ARP file\n[step=S3.skip]\n[vals arp_skipped=true]
+end
+
+@enduml

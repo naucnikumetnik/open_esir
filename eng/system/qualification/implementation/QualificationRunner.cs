@@ -1,9 +1,11 @@
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using System.Text.Json;
+using OpenFiscalCore.System.Domains.ESDC.Types.AuditProof;
 using OpenFiscalCore.System.Domains.ESDC.Types.Backend;
 using OpenFiscalCore.System.Domains.ESDC.Types.Enums;
 using OpenFiscalCore.System.Domains.ESDC.Types.Health;
+using OpenFiscalCore.System.Domains.ESDC.Types.LocalFiscalization;
 using OpenFiscalCore.System.Domains.ESDC.Types.Media;
 using OpenFiscalCore.System.Domains.ESDC.Types.Pki;
 using OpenFiscalCore.System.Domains.ESDC.Types.Primitives;
@@ -11,8 +13,11 @@ using OpenFiscalCore.System.Domains.ESDC.Types.RuntimeStore.Records;
 using OpenFiscalCore.System.Domains.ESDC.Types.Shared;
 using OpenFiscalCore.System.Domains.ESDC.Types.SecureElement;
 using OpenFiscalCore.System.Domains.ESDC.Types.States;
+using OpenFiscalCore.System.Domains.ESIR.Types.Enums;
 using OpenFiscalCore.System.Domains.ESIR.Types.Health;
+using OpenFiscalCore.System.Domains.ESIR.Types.Routing;
 using OpenFiscalCore.System.Domains.ESIR.Types.States;
+using OpenFiscalCore.System.Domains.ESIR.Types.Validation;
 using OpenFiscalCore.System.Types.Domain;
 using OpenFiscalCore.System.Types.Enums;
 using OpenFiscalCore.System.Types.Lpfr;
@@ -29,26 +34,47 @@ internal static class QualificationRunner
 
     public static void Run()
     {
+        // ── Gate 1: Structural checks (existing) ──────────────────
         RunCoverageChecks();
         RunWrapperValidationChecks();
         RunBoundaryValidationChecks();
         RunJsonRoundTripChecks();
         RunStateTraceabilityChecks();
         RunRuntimeStoreShapeChecks();
+
+        // ── Gate 2: Behavioral checks (system qualification) ──────
+        var behavioralResults = BehavioralRunner.RunAll();
+        TestReporter.PrintResults(behavioralResults);
+        TestReporter.PrintSummary(behavioralResults);
+
+        if (behavioralResults.Any(r => r.Status == TestStatus.Fail))
+            throw new InvalidOperationException(
+                $"Behavioral qualification failed: {behavioralResults.Count(r => r.Status == TestStatus.Fail)} test(s) failed.");
     }
 
     private static void RunCoverageChecks()
     {
-        var path = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "../../../../../types/design/TYPE_SYS_DIAGRAM_TYPE_EXTRACTION_LEDGER.json"));
+        var systemRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var ledgerPaths = Directory.GetFiles(systemRoot, "TYPE_*_DIAGRAM_TYPE_EXTRACTION_LEDGER.json", SearchOption.AllDirectories);
 
-        var ledger = JsonSerializer.Deserialize<List<LedgerEntry>>(File.ReadAllText(path), new JsonSerializerOptions
+        AssertEx.True(ledgerPaths.Length >= 3, "Expected system and domain extraction ledgers to be present.");
+
+        var ledger = new List<LedgerEntry>();
+        var serializerOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
-        }) ?? throw new InvalidOperationException("Extraction ledger could not be deserialized.");
+        };
 
-        AssertEx.True(ledger.Count >= 90, "Extraction ledger is missing expected entries.");
+        foreach (var ledgerPath in ledgerPaths)
+        {
+            var entries = JsonSerializer.Deserialize<List<LedgerEntry>>(File.ReadAllText(ledgerPath), serializerOptions)
+                ?? throw new InvalidOperationException($"Extraction ledger '{ledgerPath}' could not be deserialized.");
+
+            AssertEx.True(entries.Count > 0, $"Extraction ledger '{Path.GetFileName(ledgerPath)}' should not be empty.");
+            ledger.AddRange(entries);
+        }
+
+        AssertEx.True(ledger.Count >= 150, "Extraction ledgers are missing expected entries.");
 
         foreach (var assemblyPath in Directory.GetFiles(AppContext.BaseDirectory, "OpenFiscalCore*.dll"))
         {
@@ -93,6 +119,9 @@ internal static class QualificationRunner
         AssertEx.Throws<ArgumentException>(() => new EncryptionCertificateBase64(ReadOnlyMemory<byte>.Empty), "EncryptionCertificateBase64 should reject empty payloads.");
         AssertEx.Throws<ArgumentException>(() => new TaxCorePublicKey(new byte[32]), "TaxCorePublicKey should enforce canonical payload length.");
         AssertEx.Throws<ArgumentException>(() => new AuditRequestPayload(new byte[32]), "AuditRequestPayload should enforce canonical payload length.");
+        AssertEx.Throws<ArgumentException>(() => new StatusWord("0x900"), "StatusWord should require a 16-bit hexadecimal payload.");
+        AssertEx.Equal("0x9000", new StatusWord("9000").ToString(), "StatusWord should normalize raw hexadecimal input.");
+        AssertEx.True(new StatusWord("0x9000").IsSuccess, "StatusWord should expose APDU success semantics.");
         AssertEx.True(new AuditDataStatusCode(1).IsRetryable, "AuditDataStatusCode should expose retryable semantics.");
         AssertEx.True(new AuditDataStatusCode(4).ShouldDeleteLocal, "AuditDataStatusCode should expose delete-local semantics.");
         AssertEx.True(new AuditDataStatusCode(78).ShouldHoldLocal, "AuditDataStatusCode should expose hold-local semantics for non-retryable failures.");
@@ -105,6 +134,8 @@ internal static class QualificationRunner
         ExpectValidationFailure(new ValidationErrorResponse(string.Empty, Array.Empty<ValidationErrorItem>()), "ValidationErrorResponse should require a message and model state.");
         ExpectValidationFailure(new EnvironmentDescriptorList(Array.Empty<EnvironmentDescriptor>()), "EnvironmentDescriptorList should require at least one item.");
         ExpectValidationFailure(new MediaCommandResults(Array.Empty<MediaCommandResultItem>()), "MediaCommandResults should require at least one item.");
+        ExpectValidationFailure(new PreparedTaxBreakdownItem(string.Empty, -1m, -1m, -1m, -1m), "PreparedTaxBreakdownItem should reject invalid values.");
+        ExpectValidationFailure(new PreparedInvoiceValidationErrorList(Array.Empty<PreparedInvoiceValidationError>()), "PreparedInvoiceValidationErrorList should require at least one item.");
         ExpectValidationFailure(new InvoiceRequest(
             DateTimeOffset.Parse("2026-04-15T10:15:00+02:00"),
             TaxCoreInvoiceType.Normal,
@@ -134,6 +165,12 @@ internal static class QualificationRunner
             [new InvoiceItem(null, "Bread", 1m, ["A"], 100m, 100m)]);
 
         validInvoiceRequest.EnsureValid();
+        ExpectValidationFailure(
+            new PreparedInvoiceRequest(
+                validInvoiceRequest,
+                new PreparedInvoiceTotals(100m, 100m, 20m),
+                Array.Empty<PreparedTaxBreakdownItem>()),
+            "PreparedInvoiceRequest should require at least one tax-breakdown line.");
 
         ValidateObject(new TaxCoreConfigurationResponse(
             "Business",
@@ -164,6 +201,45 @@ internal static class QualificationRunner
 
         ValidateObject(new MediaCommandResults(
             [new MediaCommandResultItem("00000000-0000-0000-0000-000000000001", true)]));
+
+        ValidateObject(new ReadinessContext(
+            new ReadinessResult(
+                ReadinessStatus.Ready,
+                [ReadinessReason.EnvironmentContextRefreshPending]),
+            IsVsdcConfigured: true,
+            IsVsdcCertificateValid: true,
+            IsVsdcReachable: true,
+            IsEsdcAttentionReachable: true,
+            IsPinVerified: true,
+            IsAuditBlocking: false,
+            IsSecureElementCertificateValid: true));
+
+        ValidateObject(new RouteSelectionResult(
+            FiscalizationRoute.Unavailable,
+            RouteSelectionFailureCode.RouteUnavailable,
+            OnlineRouteUnavailableReason.Unreachable,
+            LocalRouteUnavailableReason.PinRequired));
+
+        ValidateObject(new PreparedInvoiceValidationFailure(
+            PreparedInvoiceFailureCode.ValidationFailed,
+            new PreparedInvoiceValidationErrorList(
+                [new PreparedInvoiceValidationError("items[0].labels[0]", "unknown_tax_label", "The supplied tax label is not configured.")])));
+
+        ValidateObject(new PreparedInvoiceRequest(
+            validInvoiceRequest,
+            new PreparedInvoiceTotals(100m, 100m, 20m),
+            [new PreparedTaxBreakdownItem("A", 20m, 83.33m, 16.67m, 100m)]));
+
+        ValidateObject(new BackendSyncResult(BackendSyncOutcome.Synced));
+        ValidateObject(new SeDirectiveResult(SecureElementOperationOutcome.Success, new StatusWord("0x9000")));
+        ValidateObject(new AuditCycleOutcome(AuditCycleDisposition.AuditCleared, 0, ProofCompletionStatus.Completed));
+        ValidateObject(new OpenFiscalCore.System.Domains.ESDC.Types.AuditProof.EndAuditResult(EndAuditStatus.Success, new StatusWord("0x9000")));
+        ValidateObject(new MediaDetectionResult(true, true));
+        ValidateObject(new MediaCommandResult(2, 2, 0));
+        ValidateObject(new ExportSetResult(true, 3, true));
+        ValidateObject(new SeProbeResult(ProbeStatus.Pass, new Uid("ABCDEFG1")));
+        ValidateObject(new PinVerifyResult(PinVerificationOutcome.PinFailed, new PinTriesLeft(2)));
+        ValidateObject(new LocalFiscalizationFailure(LocalFiscalizationFailureCode.SeSigningFailed, new StatusWord("0x6F00")));
     }
 
     private static void RunJsonRoundTripChecks()
@@ -266,6 +342,75 @@ internal static class QualificationRunner
         var mediaResults = JsonSerializer.Deserialize<MediaCommandResults>(mediaResultsJson, JsonOptions)
             ?? throw new InvalidOperationException("MediaCommandResults round-trip failed.");
         AssertEx.True(mediaResults.Items[0].ProcessingSucceeded, "MediaCommandResults should preserve command processing outcomes.");
+
+        var routeSelectionResultJson = JsonSerializer.Serialize(
+            new RouteSelectionResult(
+                FiscalizationRoute.Unavailable,
+                RouteSelectionFailureCode.RouteUnavailable,
+                OnlineRouteUnavailableReason.Unreachable,
+                LocalRouteUnavailableReason.PinRequired),
+            JsonOptions);
+        var routeSelectionResult = JsonSerializer.Deserialize<RouteSelectionResult>(routeSelectionResultJson, JsonOptions)
+            ?? throw new InvalidOperationException("RouteSelectionResult round-trip failed.");
+        AssertEx.Equal(FiscalizationRoute.Unavailable, routeSelectionResult.Route, "RouteSelectionResult should preserve the selected route.");
+        AssertEx.Equal(OnlineRouteUnavailableReason.Unreachable, routeSelectionResult.OnlineReason ?? default, "RouteSelectionResult should preserve online unavailability reason.");
+        AssertEx.Equal(LocalRouteUnavailableReason.PinRequired, routeSelectionResult.LocalReason ?? default, "RouteSelectionResult should preserve local unavailability reason.");
+
+        var preparedInvoiceRequest = new PreparedInvoiceRequest(
+            invoiceRequest,
+            new PreparedInvoiceTotals(100m, 100m, 20m),
+            [new PreparedTaxBreakdownItem("A", 20m, 83.33m, 16.67m, 100m)]);
+        var preparedInvoiceJson = JsonSerializer.Serialize(preparedInvoiceRequest, JsonOptions);
+        var preparedInvoiceRoundTrip = JsonSerializer.Deserialize<PreparedInvoiceRequest>(preparedInvoiceJson, JsonOptions)
+            ?? throw new InvalidOperationException("PreparedInvoiceRequest round-trip failed.");
+        AssertEx.Equal("INV-1", preparedInvoiceRoundTrip.NormalizedRequest.InvoiceNumber ?? string.Empty, "PreparedInvoiceRequest should preserve the normalized invoice reference.");
+        AssertEx.Equal(1, preparedInvoiceRoundTrip.TaxBreakdown.Count, "PreparedInvoiceRequest should preserve tax breakdown items.");
+
+        var backendSyncJson = JsonSerializer.Serialize(
+            new BackendSyncResult(BackendSyncOutcome.Failed, BackendSyncReason.AuthContextUnavailable),
+            JsonOptions);
+        var backendSync = JsonSerializer.Deserialize<BackendSyncResult>(backendSyncJson, JsonOptions)
+            ?? throw new InvalidOperationException("BackendSyncResult round-trip failed.");
+        AssertEx.Equal(BackendSyncOutcome.Failed, backendSync.Outcome, "BackendSyncResult should preserve outcome.");
+        AssertEx.Equal(BackendSyncReason.AuthContextUnavailable, backendSync.Reason ?? default, "BackendSyncResult should preserve failure reason.");
+
+        var auditCycleJson = JsonSerializer.Serialize(
+            new AuditCycleOutcome(AuditCycleDisposition.ProofPending, 2, ProofCompletionStatus.Pending),
+            JsonOptions);
+        var auditCycle = JsonSerializer.Deserialize<AuditCycleOutcome>(auditCycleJson, JsonOptions)
+            ?? throw new InvalidOperationException("AuditCycleOutcome round-trip failed.");
+        AssertEx.Equal(AuditCycleDisposition.ProofPending, auditCycle.State, "AuditCycleOutcome should preserve disposition.");
+        AssertEx.Equal(2, auditCycle.PackagesRemaining, "AuditCycleOutcome should preserve remaining package count.");
+
+        var endAuditJson = JsonSerializer.Serialize(
+            new OpenFiscalCore.System.Domains.ESDC.Types.AuditProof.EndAuditResult(EndAuditStatus.Error, new StatusWord("0x6985")),
+            JsonOptions);
+        var endAudit = JsonSerializer.Deserialize<OpenFiscalCore.System.Domains.ESDC.Types.AuditProof.EndAuditResult>(endAuditJson, JsonOptions)
+            ?? throw new InvalidOperationException("EndAuditResult round-trip failed.");
+        AssertEx.Equal("0x6985", endAudit.StatusWord.Value, "EndAuditResult should preserve the APDU status word.");
+
+        var mediaDetectionJson = JsonSerializer.Serialize(
+            new MediaDetectionResult(false, false, MediaDetectionFailureReason.UnsupportedFilesystem),
+            JsonOptions);
+        var mediaDetection = JsonSerializer.Deserialize<MediaDetectionResult>(mediaDetectionJson, JsonOptions)
+            ?? throw new InvalidOperationException("MediaDetectionResult round-trip failed.");
+        AssertEx.Equal(MediaDetectionFailureReason.UnsupportedFilesystem, mediaDetection.Reason ?? default, "MediaDetectionResult should preserve the failure reason.");
+
+        var pinVerifyJson = JsonSerializer.Serialize(
+            new PinVerifyResult(PinVerificationOutcome.PinFailed, new PinTriesLeft(2)),
+            JsonOptions);
+        var pinVerify = JsonSerializer.Deserialize<PinVerifyResult>(pinVerifyJson, JsonOptions)
+            ?? throw new InvalidOperationException("PinVerifyResult round-trip failed.");
+        AssertEx.Equal(PinVerificationOutcome.PinFailed, pinVerify.Outcome, "PinVerifyResult should preserve the verification status.");
+        AssertEx.Equal((byte)2, pinVerify.RetriesRemaining?.Value ?? byte.MaxValue, "PinVerifyResult should preserve remaining retries.");
+
+        var localFiscalizationFailureJson = JsonSerializer.Serialize(
+            new LocalFiscalizationFailure(LocalFiscalizationFailureCode.SeSigningFailed, new StatusWord("6F00")),
+            JsonOptions);
+        var localFiscalizationFailure = JsonSerializer.Deserialize<LocalFiscalizationFailure>(localFiscalizationFailureJson, JsonOptions)
+            ?? throw new InvalidOperationException("LocalFiscalizationFailure round-trip failed.");
+        AssertEx.Equal(LocalFiscalizationFailureCode.SeSigningFailed, localFiscalizationFailure.Code, "LocalFiscalizationFailure should preserve the failure code.");
+        AssertEx.Equal("0x6F00", localFiscalizationFailure.Sw?.Value ?? string.Empty, "LocalFiscalizationFailure should preserve the status word.");
     }
 
     private static void RunStateTraceabilityChecks()

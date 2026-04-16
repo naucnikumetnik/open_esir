@@ -1,0 +1,66 @@
+@startuml
+title Prepare signing input from validated request — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "LocalFiscalizationEngine" as CC_LFE <<component>>
+end box
+
+note over CC_LFE #FFF8DC
+S_LEAF_ESDC_PREPARE_SIGN_INPUT
+parent_ref: S_CMP_ESDC_LOCAL_FISCALIZATION_MASTER / GRP_LOCAL_FISC_PREPARE_SIGN_INPUT
+guard_ref: G_ESDC_LOCAL_FISCALIZATION_SIGN_INPUT_READY
+behavior_ref: B_ESDC_LOCAL_FISCALIZATION_PREPARE_SIGN_INPUT
+end note
+
+note over CC_LFE
+  Maps a validated InvoiceRequest into a SignInvoiceApduRequest
+  suitable for the Secure Element APDU command (CLA 0x88 INS 0x13).
+
+  The mapping follows the TaxCore SE signing APDU specification:
+  invoice data is serialized into the APDU data field per protocol.
+end note
+
+' ============================================================================
+' S1 — Serialize invoice data for APDU payload
+' ============================================================================
+group S1 "GRP_SIGN_INPUT_SERIALIZE_INVOICE_DATA"
+  CC_LFE -> CC_LFE : extract and serialize invoice header fields\n(invoiceType, transactionType, dateTimeCreated, invoiceNumber, cashier)\n[step=S1.1]
+  CC_LFE -> CC_LFE : serialize item array (name, quantity, unitPrice, labels per item)\n[step=S1.2]
+  CC_LFE -> CC_LFE : serialize payment array (paymentType, amount per payment)\n[step=S1.3]
+  CC_LFE -> CC_LFE : serialize buyer data if present (buyerId, buyerCostCenterId)\n[step=S1.4]
+  CC_LFE -> CC_LFE : serialize referent document data if present\n[step=S1.5]
+  CC_LFE -> CC_LFE : compute totalAmount and tax breakdown for APDU payload\n[step=S1.6]
+end
+
+' ============================================================================
+' S2 — Compose APDU command structure
+' ============================================================================
+group S2 "GRP_SIGN_INPUT_COMPOSE_APDU"
+  CC_LFE -> CC_LFE : compose SignInvoiceApduRequest with CLA=0x88, INS=0x13\n[step=S2.1]\n[vals cla=0x88; ins=0x13; data=<serialized_invoice_payload>]
+  CC_LFE -> CC_LFE : set APDU data length (Lc) and expected response length (Le)\n[step=S2.2]
+end
+
+' ============================================================================
+' S3 — Validate composed signing input
+' ============================================================================
+group S3 "GRP_SIGN_INPUT_VALIDATE"
+  CC_LFE -> CC_LFE : verify APDU payload size within SE maximum\n[step=S3.1]\n[vals payload_size=<bytes>; max_apdu_data=<limit>]
+  CC_LFE -> CC_LFE : verify all required APDU fields populated\n[step=S3.2]
+
+  alt [COND=sign input exceeds SE limits or incomplete]
+    CC_LFE -> CC_LFE : sign input preparation failed\n[step=S3.3e]\n[vals sign_input_ready=false; error=sign_input_invalid]
+  else [COND=sign input valid]
+    CC_LFE -> CC_LFE : signing input ready\n[step=S3.4]\n[vals sign_input_ready=true; sign_request=<SignInvoiceApduRequest>]
+  end
+end
+
+@enduml

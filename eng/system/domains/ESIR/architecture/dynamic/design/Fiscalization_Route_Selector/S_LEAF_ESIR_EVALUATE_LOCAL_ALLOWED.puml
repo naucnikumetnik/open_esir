@@ -1,0 +1,97 @@
+@startuml
+title Evaluate local (E-SDC) path availability — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "FiscalizationRouteSelector" as CC_ROUTE <<component>>
+end box
+
+note over CC_ROUTE #FFF8DC
+S_LEAF_ESIR_EVALUATE_LOCAL_ALLOWED
+guard_ref: G_ESIR_FISCALIZATION_LOCAL_ALLOWED
+parent_ref: S_CMP_ESIR_ROUTE_SELECTION_MASTER / GRP_ROUTE_EVALUATE_LOCAL
+end note
+
+note over CC_ROUTE
+  Evaluates whether the E-SDC local fiscalization path
+  is available for this request.
+
+  Uses cached readiness context from S_SYS_STATUS_AND_OPERATOR_RECOVERY
+  StatusResponse: isPinRequired, auditRequired, sdcDateTime, uid, gsc.
+  No live probes — evaluation is synchronous from cached state.
+end note
+
+' ============================================================================
+' S1 — Check configured fiscalization mode
+' ============================================================================
+group S1 "GRP_LOCAL_CHECK_CONFIGURED_MODE"
+  CC_ROUTE -> CC_ROUTE : check configuredMode includes E-SDC path\n[step=S1.1]\n[vals configuredMode=<V_SDC|E_SDC|PREFER_ONLINE|PREFER_LOCAL>]
+
+  alt [COND=configuredMode == V_SDC]
+    CC_ROUTE -> CC_ROUTE : local path not configured\n[step=S1.2]\n[vals local_allowed=false; local_reason=not_configured]
+  end
+end
+
+' ============================================================================
+' S2 — Check E-SDC service reachability
+' ============================================================================
+group S2 "GRP_LOCAL_CHECK_ESDC_REACHABILITY"
+  CC_ROUTE -> CC_ROUTE : check E-SDC Attention probe result from readiness context\n[step=S2.1]\n[vals esdc_reachable=<bool>; last_attention_result=<ok|failed>]
+
+  alt [COND=esdc_reachable == false]
+    CC_ROUTE -> CC_ROUTE : E-SDC service unavailable\n[step=S2.2]\n[vals local_allowed=false; local_reason=esdc_unavailable]
+  end
+end
+
+' ============================================================================
+' S3 — Check Secure Element session status
+' ============================================================================
+group S3 "GRP_LOCAL_CHECK_SE_SESSION"
+  CC_ROUTE -> CC_ROUTE : check SE PIN verification status from readiness context\n[step=S3.1]\n[vals isPinRequired=<bool>; se_locked=<bool>]
+
+  alt [COND=isPinRequired == true]
+    CC_ROUTE -> CC_ROUTE : SE PIN not yet verified\n[step=S3.2]\n[vals local_allowed=false; local_reason=pin_required]
+
+  else [COND=se_locked == true]
+    CC_ROUTE -> CC_ROUTE : SE locked after failed PIN attempts\n[step=S3.3]\n[vals local_allowed=false; local_reason=se_locked]
+  end
+end
+
+' ============================================================================
+' S4 — Check audit-required blocking flag
+' ============================================================================
+group S4 "GRP_LOCAL_CHECK_AUDIT_BLOCKING"
+  CC_ROUTE -> CC_ROUTE : check auditRequired flag from StatusResponse\n[step=S4.1]\n[vals auditRequired=<bool>]
+
+  alt [COND=auditRequired == true]
+    CC_ROUTE -> CC_ROUTE : audit cycle required before fiscalization\n[step=S4.2]\n[vals local_allowed=false; local_reason=audit_blocking]
+  end
+end
+
+' ============================================================================
+' S5 — Check local certificate validity
+' ============================================================================
+group S5 "GRP_LOCAL_CHECK_CERTIFICATE"
+  CC_ROUTE -> CC_ROUTE : check SE certificate validity window from readiness context\n[step=S5.1]\n[vals cert_valid=<bool>; cert_valid_until=<datetime>]
+
+  alt [COND=cert_valid == false]
+    CC_ROUTE -> CC_ROUTE : local certificate expired or not yet valid\n[step=S5.2]\n[vals local_allowed=false; local_reason=certificate_invalid]
+  end
+end
+
+' ============================================================================
+' S6 — Derive local availability
+' ============================================================================
+group S6 "GRP_LOCAL_DERIVE_RESULT"
+  CC_ROUTE -> CC_ROUTE : all local preconditions satisfied\n[step=S6.1]\n[vals local_allowed=true; local_reason=available]
+end
+
+@enduml

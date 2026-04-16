@@ -1,0 +1,72 @@
+@startuml
+title Complete proof with EndAuditApdu — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "AuditAndProofLifecycleManager" as CC_APLM <<component>>
+  control "SecureElementAdapter" as CC_SEA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  entity "SE\n(Security Element)" as EXT_SE <<external>>
+end box
+
+note over CC_APLM, EXT_SE #FFF8DC
+S_LEAF_ESDC_COMPLETE_PROOF
+parent_ref: S_CMP_ESDC_AUDIT_AND_PROOF_MASTER / GRP_PROOF_COMPLETE
+behavior_ref: B_ESDC_AUDIT_AND_PROOF_COMPLETE_PROOF
+end note
+
+note over CC_APLM, CC_SEA
+  After the proof-of-audit request has been submitted (CTR-403) and
+  the backend returns a proof-related command through the normal
+  command channel, the manager completes the proof cycle by
+  sending EndAuditApdu to the SE with the received ProofOfAudit
+  payload. This resets the SE audit counter and records the
+  proof artifact locally.
+end note
+
+' ============================================================================
+' S1 — Receive proof command from backend command channel
+' ============================================================================
+group S1 "GRP_PROOF_RECEIVE_COMMAND"
+  CC_APLM -> CC_APLM : retrieve proof-of-audit command from command backlog\n[step=S1.1]\n[vals commandId=<cmd.commandId>; proofPayload=ProofOfAudit]
+end
+
+' ============================================================================
+' S2 — Send EndAuditApdu to SE with proof payload
+' ============================================================================
+group S2 "GRP_PROOF_END_AUDIT"
+  CC_APLM -> CC_SEA : IF_CMP_ESDC_SECURE_ELEMENT.endAudit(proof:ProofOfAudit) -> Result[EndAuditResult]\n[step=S2.1]\n[connection use_port=P_APLM_USE_SECURE_ELEMENT; prov_port=P_SEA_PROV_SECURE_ELEMENT; conn=C_APLM__SEA__SECURE_ELEMENT]
+  activate CC_SEA
+  CC_SEA -> EXT_SE : IF_DEP_SECURE_ELEMENT.EndAuditApdu(proof:ProofOfAudit)\n[step=S2.2]\n[connection use_port=P_ESDC_USE_SECURE_ELEMENT; prov_port=P_SE_PROV_SECURE_ELEMENT; conn=C_ESDC__SE__SECURE_ELEMENT]
+  activate EXT_SE
+
+  alt [COND=SW == 0x9000 (success)]
+    EXT_SE --> CC_SEA : [step=S2.2r]\n[vals SW=0x9000; result=ok]
+    deactivate EXT_SE
+    CC_SEA --> CC_APLM : [step=S2.1r]\n[vals endAuditResult=success]
+    deactivate CC_SEA
+
+    CC_APLM -> CC_APLM : record proof artifact in local storage\n[step=S2.3a]\n[vals proof_recorded=true; audit_counter_reset=true]\n[store_write entity=E_PROOF_ARTIFACT_RECORD; pattern_ref=AP_CMP_CLOSE_PROOF_CYCLE]\n[invariant_ref=INV_APS_005 — proof artifacts remain opaque, not reinterpreted as public verification bodies]
+    CC_APLM -> CC_APLM : mark proof cycle complete, update audit backlog disposition\n[step=S2.4a]\n[vals proof_status=completed]\n[store_write entity=E_PROOF_CYCLE_RECORD(phase=completed); entity=E_AUDIT_BACKLOG_INDEX(disposition=proof_cleared); pattern_ref=AP_CMP_CLOSE_PROOF_CYCLE]
+
+  else [COND=APDU error (SW != 0x9000)]
+    EXT_SE --> CC_SEA : [step=S2.2e]\n[vals SW=<error_sw>; result=apdu_error]
+    deactivate EXT_SE
+    CC_SEA --> CC_APLM : [step=S2.1e]\n[vals endAuditResult=error; sw=<error_sw>]
+    deactivate CC_SEA
+
+    CC_APLM -> CC_APLM : retain proof obligation for next cycle\n[step=S2.3e]\n[vals proof_status=pending; reason=se_error; sw=<error_sw>]
+  end
+end
+
+@enduml

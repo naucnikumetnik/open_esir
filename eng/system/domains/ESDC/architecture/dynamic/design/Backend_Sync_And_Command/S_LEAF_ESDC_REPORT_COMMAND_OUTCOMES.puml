@@ -1,0 +1,67 @@
+@startuml
+title Report command execution outcomes — E-SDC leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "CommandLifecycleCoordinator" as CC_CLC <<component>>
+  control "TaxCoreEsdcBackendAdapter" as CC_TBA <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control "TaxCore Backend\n(E-SDC API)" as EXT_TCB <<external>>
+end box
+
+note over CC_CLC, EXT_TCB #FFF8DC
+S_LEAF_ESDC_REPORT_COMMAND_OUTCOMES
+parent_ref: S_CMP_ESDC_BACKEND_SYNC_MASTER / GRP_BACKEND_SYNC_REPORT
+behavior_ref: B_ESDC_BACKEND_SYNC_REPORT_OUTCOMES
+state_machine_ref: SM_SYS_ESDC_BACKEND_SYNC_AND_COMMAND / ST_ESDC_BACKEND_SYNC_REPORTING
+end note
+
+note over CC_CLC, CC_TBA
+  For each executed command, CommandLifecycleCoordinator reports
+  the success/failure boolean back to TaxCore Backend via
+  NotifyCommandProcessed. Commands are reported individually.
+  Transient network errors are tolerated — failed reports
+  remain in the backlog for the next sync cycle.
+end note
+
+' ============================================================================
+' S1 — Report outcomes loop
+' ============================================================================
+group S1 "GRP_REPORT_LOOP"
+  loop [COND=for each executed Command with pending outcome report]
+
+    CC_CLC -> CC_TBA : IF_CMP_ESDC_TAXCORE_ESDC_BACKEND.notifyCommandProcessed(commandId:string, outcome:bool) -> Result[void]\n[step=S1.1]\n[connection use_port=P_CLC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TBA_PROV_TAXCORE_ESDC_BACKEND; conn=C_CLC__TBA__TAXCORE_ESDC_BACKEND]\n[vals commandId=<command.commandId>; outcome=<true|false>]
+    activate CC_TBA
+
+    CC_TBA -> EXT_TCB : IF_DEP_TAXCORE_ESDC_BACKEND.NotifyCommandProcessed(commandId, body:BooleanFlagBody) -> void\n[step=S1.2]\n[connection use_port=P_ESDC_USE_TAXCORE_ESDC_BACKEND; prov_port=P_TCB_PROV_TAXCORE_ESDC_BACKEND; conn=C_ESDC__TCB__TAXCORE_ESDC_BACKEND]\n[CTR-303 · HTTPS PUT /api/v3/sdc/commands/{commandId} · TaxCoreAuthenticationToken]
+    activate EXT_TCB
+
+    alt [COND=HTTP 200 OK]
+      EXT_TCB --> CC_TBA : [step=S1.2r]\n[vals ack=true]
+      deactivate EXT_TCB
+      CC_TBA --> CC_CLC : [step=S1.1r]\n[vals reported=true]
+      deactivate CC_TBA
+      CC_CLC -> CC_CLC : remove command from backlog\n[step=S1.3a]\n[vals commandId=<command.commandId>; backlog_updated=true]\n[store_write entity=E_BACKEND_COMMAND_RECORD; entity=E_BACKEND_COMMAND_INDEX; pattern_ref=AP_CMP_APPLY_AND_ACK_COMMAND]
+
+    else [COND=network error or HTTP 4xx/5xx]
+      EXT_TCB --> CC_TBA : [step=S1.2e]\n[vals error=<network_error|http_error>; statusCode=<code>]
+      deactivate EXT_TCB
+      CC_TBA --> CC_CLC : [step=S1.1e]\n[vals reported=false; reason=<transient_error>]
+      deactivate CC_TBA
+      CC_CLC -> CC_CLC : retain command in backlog for next cycle\n[step=S1.3e]\n[vals commandId=<command.commandId>; retained=true]
+    end
+
+  end
+end
+
+@enduml

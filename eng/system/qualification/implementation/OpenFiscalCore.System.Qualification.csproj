@@ -15,5 +15,8 @@
     <Reference Include="OpenFiscalCore.System.Domains.ESDC.Types">
       <HintPath>../../domains/ESDC/types/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Domains.ESDC.Types.dll</HintPath>
     </Reference>
+    <Reference Include="OpenFiscalCore.System.Interfaces.External">
+      <HintPath>../../interfaces/external/implementation/bin/$(Configuration)/$(TargetFramework)/OpenFiscalCore.System.Interfaces.External.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

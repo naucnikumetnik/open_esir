@@ -1,0 +1,90 @@
+artifact_kind: system_test_strategy_placeholder
+schema_version: "0.1"
+
+card:
+  id: ST_STRATEGY
+  name: System Qualification Strategy
+  system_of_interest: Open Fiscal Core
+  status: placeholder
+  note: >
+    Being developed in a parallel thread. This placeholder captures storage-specific
+    qualification needs identified during storage architecture work.
+
+storage_qualification_needs:
+  - area: counter_continuity
+    description: >
+      Verify ST_COUNTER_STATE survives power-cycle scenarios. Counter must not
+      regress or skip after unexpected shutdown.
+    invariant_refs:
+      - INV_LFS_001   # from DV_CMP_ESDC_LOCAL_FISCALIZATION_STORAGE
+    suggested_approach: >
+      Inject controlled power-cycle simulation after counter advance. Verify
+      counter restore on bootstrap matches last persisted value.
+
+  - area: append_only_journal_integrity
+    description: >
+      Verify E_LOCAL_JOURNAL_RECORD append-only semantics. No casual update or
+      overwrite after initial write.
+    invariant_refs:
+      - INV_LFS_003   # from DV_CMP_ESDC_LOCAL_FISCALIZATION_STORAGE
+      - INV_APS_006   # from DV_CMP_ESDC_AUDIT_PROOF_STORAGE
+    suggested_approach: >
+      Write journal records, attempt overwrite, verify rejection. Verify pruning
+      only through explicit compaction API.
+
+  - area: audit_package_canonical_shape
+    description: >
+      Verify AuditPackage (key, iv, payload) round-trips without aliasing or
+      reshaping through storage.
+    invariant_refs:
+      - INV_LFS_004   # from DV_CMP_ESDC_LOCAL_FISCALIZATION_STORAGE
+      - INV_APS_007   # from DV_CMP_ESDC_AUDIT_PROOF_STORAGE
+    suggested_approach: >
+      Store a known AuditPackage, retrieve it, binary-compare all three fields.
+
+  - area: audit_vs_export_boundary
+    description: >
+      Verify export success does NOT trigger audit backlog deletion. The
+      proof-of-audit lifecycle is the sole deletion authority.
+    invariant_refs:
+      - INV_APS_001   # from DV_CMP_ESDC_AUDIT_PROOF_STORAGE
+      - INV_EXS_001   # from DV_CMP_ESDC_LOCAL_EXPORT_STORAGE
+      - INV_EXS_004   # from DV_CMP_ESDC_LOCAL_EXPORT_STORAGE
+    suggested_approach: >
+      Complete an export window successfully, verify audit backlog remains intact.
+      Only proof-of-audit backend status 4 should allow deletion.
+
+  - area: proof_entity_separation
+    description: >
+      Verify AuditRequestPayload and ProofOfAuditRequest remain distinct storage
+      entities and are not merged.
+    invariant_refs:
+      - INV_APS_004   # from DV_CMP_ESDC_AUDIT_PROOF_STORAGE
+    suggested_approach: >
+      Create both entities in a proof cycle, verify they can be independently
+      retrieved and have distinct storage keys.
+
+  - area: command_recovery_idempotency
+    description: >
+      Verify command state recovery produces identical outcomes on retry after
+      crash mid-execution.
+    invariant_refs:
+      - INV_CRS_001   # from DV_CMP_ESDC_COMMAND_RECOVERY_STORAGE
+    suggested_approach: >
+      Start a command, simulate crash at each state transition, recover, verify
+      final state matches the expected outcome.
+
+  - area: export_media_filename_conventions
+    description: >
+      Verify staged media artifacts use official filename conventions.
+    invariant_refs:
+      - INV_EXS_002   # from DV_CMP_ESDC_LOCAL_EXPORT_STORAGE
+    suggested_approach: >
+      Stage export artifacts, verify filenames match the regulatory pattern.
+
+traceability_to_master:
+  master_strategy_ref: master_V&V_strategy.md
+  relationship: >
+    This strategy is subordinate to the master V&V strategy. It provides
+    system-level qualification detail that the master references at section
+    level only.

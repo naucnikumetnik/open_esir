@@ -1,0 +1,109 @@
+@startuml
+title Backend sync and command lifecycle — E-SDC component master
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+participant "Caller\n(EsdcFacade)" as CC_FACADE
+
+box "E-SDC — Internal Components" #F3F3F3
+  control "CommandLifecycleCoordinator" as CC_CLC <<component>>
+  control "TaxCoreEsdcBackendAdapter" as CC_TBA <<component>>
+  control "PkiClientContextAdapter" as CC_PKI <<component>>
+end box
+
+box "External Dependencies" #EEF5FF
+  control "TaxCore Backend\n(E-SDC API)" as EXT_TCB <<external>>
+  entity "PKI Applet /\nClient Certificate" as EXT_PKI <<external>>
+end box
+
+note over CC_FACADE, EXT_PKI #FFF8DC
+S_CMP_ESDC_BACKEND_SYNC_MASTER
+dynamic_view_ref: S_SYS_BACKEND_SYNC_AND_COMMAND_LIFECYCLE
+state_machine_ref: SM_SYS_ESDC_BACKEND_SYNC_AND_COMMAND
+end note
+
+note over CC_CLC, CC_TBA
+  CommandLifecycleCoordinator owns the sync cycle:
+  ensure auth → announce status → capture commands →
+  execute commands → report outcomes.
+
+  TaxCoreEsdcBackendAdapter handles all HTTP interactions
+  with the TaxCore E-SDC Backend API.
+end note
+
+' ============================================================================
+' S1 — Facade triggers backend sync cycle
+' ============================================================================
+group S1 "GRP_BACKEND_SYNC_START_CYCLE"
+  CC_FACADE -> CC_CLC : IF_CMP_ESDC_BACKEND_SYNC.runBackendSyncCycle() -> Result[BackendSyncResult]\n[step=S1.1]\n[connection use_port=P_FACADE_USE_BACKEND_SYNC; prov_port=P_CLC_PROV_BACKEND_SYNC; conn=C_FACADE__CLC__BACKEND_SYNC]
+  activate CC_CLC
+end
+
+' ============================================================================
+' S2 — Ensure authentication context
+' ============================================================================
+group S2 "GRP_BACKEND_SYNC_ENSURE_AUTH"
+  ref over CC_CLC, CC_TBA, CC_PKI, EXT_TCB, EXT_PKI
+    expand=S_LEAF_ESDC_ENSURE_AUTH_CONTEXT
+    ref_mode=call_return
+    behavior_ref=B_ESDC_BACKEND_SYNC_ENSURE_AUTH_CONTEXT
+  end ref
+
+  alt [COND=auth_context_unavailable]
+    CC_CLC --> CC_FACADE : [step=S2.1e]\n[vals result=BackendSyncResult(outcome=failed; reason=auth_context_unavailable)]
+    deactivate CC_CLC
+  end
+end
+
+' ============================================================================
+' S3 — Announce status and capture commands
+' ============================================================================
+group S3 "GRP_BACKEND_SYNC_ANNOUNCE_AND_CAPTURE"
+  ref over CC_CLC, CC_TBA, EXT_TCB
+    expand=S_LEAF_ESDC_ANNOUNCE_STATUS_AND_CAPTURE_COMMANDS
+    ref_mode=call_return
+    behavior_ref=B_ESDC_BACKEND_SYNC_ANNOUNCE_STATUS, B_ESDC_BACKEND_SYNC_CAPTURE_COMMANDS
+  end ref
+end
+
+' ============================================================================
+' S4 — Execute captured commands
+' ============================================================================
+alt [COND=commands_captured]
+  group S4 "GRP_BACKEND_SYNC_EXECUTE"
+    ref over CC_CLC
+      expand=S_LEAF_ESDC_EXECUTE_COMMANDS
+      ref_mode=call_return
+      behavior_ref=B_ESDC_BACKEND_SYNC_EXECUTE_COMMANDS
+    end ref
+  end
+
+  ' ==========================================================================
+  ' S5 — Report command outcomes
+  ' ==========================================================================
+  group S5 "GRP_BACKEND_SYNC_REPORT"
+    ref over CC_CLC, CC_TBA, EXT_TCB
+      expand=S_LEAF_ESDC_REPORT_COMMAND_OUTCOMES
+      ref_mode=call_return
+      behavior_ref=B_ESDC_BACKEND_SYNC_REPORT_OUTCOMES
+    end ref
+  end
+end
+
+' ============================================================================
+' S6 — Close sync cycle
+' ============================================================================
+group S6 "GRP_BACKEND_SYNC_CLOSE"
+  CC_CLC -> CC_CLC : derive backend-sync outcome\n[step=S6.1]\n[vals outcome=<synced|commands_pending|retry_pending|degraded>]
+  CC_CLC --> CC_FACADE : [step=S6.2]\n[vals result=BackendSyncResult(outcome)]
+  deactivate CC_CLC
+end
+
+@enduml

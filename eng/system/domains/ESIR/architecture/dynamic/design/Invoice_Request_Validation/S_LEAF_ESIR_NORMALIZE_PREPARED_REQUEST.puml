@@ -1,0 +1,62 @@
+@startuml
+title Normalize and prepare final invoice request — ESIR leaf
+
+hide footbox
+autonumber 10 10
+skinparam BoxPadding 12
+skinparam SequenceMessageAlign center
+skinparam Shadowing false
+skinparam ParticipantPadding 18
+skinparam ResponseMessageBelowArrow true
+skinparam DefaultFontName Monospace
+
+box "ESIR — Internal Components" #F3F3F3
+  control "InvoiceRequestValidation" as CC_VAL <<component>>
+end box
+
+note over CC_VAL #FFF8DC
+S_LEAF_ESIR_NORMALIZE_PREPARED_REQUEST
+parent_ref: S_CMP_ESIR_VALIDATE_AND_PREPARE_REQUEST_MASTER / GRP_NORMALIZE_PREPARED_REQUEST
+behavior_ref: B_ESIR_FISCALIZATION_PREPARE_RECEIPT
+end note
+
+note over CC_VAL
+  Structural normalization only — no business validation.
+  Runs after all validation stages have passed.
+  Produces the final InvoiceRequest ready for the SDC path.
+end note
+
+' ============================================================================
+' S1 — Compute and fill derived fields
+' ============================================================================
+group S1 "GRP_NORMALIZE_COMPUTE_DERIVED_FIELDS"
+  CC_VAL -> CC_VAL : compute totalAmount from items if not explicitly provided\n[step=S1.1]\n[vals totalAmount=sum(item.quantity * item.unitPrice)]
+  CC_VAL -> CC_VAL : compute per-label tax breakdown from items and current tax rates\n[step=S1.2]\n[vals taxItems=<TaxItem[]>]
+end
+
+' ============================================================================
+' S2 — Normalize datetime formats
+' ============================================================================
+group S2 "GRP_NORMALIZE_DATETIME_FORMATS"
+  CC_VAL -> CC_VAL : normalize dateTimeCreated to UTC ISO 8601 with timezone offset\n[step=S2.1]
+  alt [COND=referentDocumentDT present]
+    CC_VAL -> CC_VAL : normalize referentDocumentDT to same format\n[step=S2.2]
+  end
+end
+
+' ============================================================================
+' S3 — Normalize string fields
+' ============================================================================
+group S3 "GRP_NORMALIZE_STRING_FIELDS"
+  CC_VAL -> CC_VAL : trim whitespace from cashier, invoiceNumber, buyerId\n[step=S3.1]
+  CC_VAL -> CC_VAL : normalize item names (trim, consistent encoding)\n[step=S3.2]
+end
+
+' ============================================================================
+' S4 — Assemble final prepared InvoiceRequest
+' ============================================================================
+group S4 "GRP_NORMALIZE_ASSEMBLE_PREPARED_REQUEST"
+  CC_VAL -> CC_VAL : assemble final InvoiceRequest with validated fields,\ncomputed tax breakdown, and normalized values\n[step=S4.1]\n[vals preparedRequest=<InvoiceRequest_normalized>]
+end
+
+@enduml
